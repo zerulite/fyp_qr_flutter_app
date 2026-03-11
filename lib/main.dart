@@ -11,83 +11,126 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const MaterialApp(home: QRBiometricPage());
+    return const MaterialApp(
+      debugShowCheckedModeBanner: false,
+      home: QRScannerPage(),
+    );
   }
 }
 
-class QRBiometricPage extends StatefulWidget {
-  const QRBiometricPage({super.key});
+class QRScannerPage extends StatefulWidget {
+  const QRScannerPage({super.key});
 
   @override
-  State<QRBiometricPage> createState() => _QRBiometricPageState();
+  State<QRScannerPage> createState() => _QRScannerPageState();
 }
 
-class _QRBiometricPageState extends State<QRBiometricPage> {
-  final LocalAuthentication auth = LocalAuthentication();
-  String qrResult = "No QR scanned";
+class _QRScannerPageState extends State<QRScannerPage> {
+  bool scanned = false;
 
-  Future<bool> authenticate() async {
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text("Scan QR Code")),
+
+      body: MobileScanner(
+        onDetect: (BarcodeCapture capture) {
+          if (scanned) return;
+
+          final barcode = capture.barcodes.first;
+
+          final String? code = barcode.rawValue;
+
+          if (code != null) {
+            scanned = true;
+
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => TransactionPage(qrData: code),
+              ),
+            ).then((_) {
+              scanned = false;
+            });
+          }
+        },
+      ),
+    );
+  }
+}
+
+class TransactionPage extends StatefulWidget {
+  final String qrData;
+
+  const TransactionPage({super.key, required this.qrData});
+
+  @override
+  State<TransactionPage> createState() => _TransactionPageState();
+}
+
+class _TransactionPageState extends State<TransactionPage> {
+  final LocalAuthentication auth = LocalAuthentication();
+
+  Future<void> authenticate() async {
     try {
       bool authenticated = await auth.authenticate(
-        localizedReason: 'Authenticate to confirm transaction',
-        options: const AuthenticationOptions(biometricOnly: true),
+        localizedReason: "Confirm transaction",
+        options: const AuthenticationOptions(
+          biometricOnly: false,
+          stickyAuth: true,
+        ),
       );
 
-      return authenticated;
+      if (authenticated) {
+        if (mounted) {
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(const SnackBar(content: Text("Payment Approved")));
+        }
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text("Authentication Failed")),
+          );
+        }
+      }
     } catch (e) {
-      return false;
+      print("Auth error: $e");
     }
-  }
-
-  void handleQRCode(String code) async {
-    bool success = await authenticate();
-
-    if (!success) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Biometric authentication failed")),
-      );
-      return;
-    }
-
-    setState(() {
-      qrResult = code;
-    });
-
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text("QR Accepted: $code")));
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text("QR Scanner + Biometrics")),
-      body: Column(
-        children: [
-          Expanded(
-            flex: 4,
-            child: MobileScanner(
-              onDetect: (BarcodeCapture capture) {
-                final List<Barcode> barcodes = capture.barcodes;
+      appBar: AppBar(title: const Text("Confirm Transaction")),
 
-                for (final barcode in barcodes) {
-                  final String? code = barcode.rawValue;
+      body: Padding(
+        padding: const EdgeInsets.all(24),
 
-                  if (code != null) {
-                    handleQRCode(code);
-                  }
-                }
-              },
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Text(
+              "QR Data",
+              style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
             ),
-          ),
 
-          Expanded(
-            flex: 1,
-            child: Center(
-              child: Text(qrResult, style: const TextStyle(fontSize: 18)),
+            const SizedBox(height: 20),
+
+            Text(
+              widget.qrData,
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontSize: 18),
             ),
-          ),
-        ],
+
+            const SizedBox(height: 40),
+
+            ElevatedButton(
+              onPressed: authenticate,
+              child: const Text("Confirm Payment"),
+            ),
+          ],
+        ),
       ),
     );
   }
