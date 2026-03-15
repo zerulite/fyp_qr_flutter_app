@@ -30,6 +30,7 @@ environment:
 dependencies:
     flutter:
         sdk: flutter
+    shared_preferences: ^2.2.2
     mobile_scanner: ^4.0.1
     local_auth: ^2.1.8
 
