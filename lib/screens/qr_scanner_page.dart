@@ -14,48 +14,41 @@ class QRScannerPage extends StatefulWidget {
 class _QRScannerPageState extends State<QRScannerPage> {
   bool scanned = false;
 
-  /// Show confirmation dialog before logging out
   Future<void> _confirmLogout() async {
-    bool confirm =
-        await showDialog(
-          context: context,
-          builder: (context) => AlertDialog(
-            title: const Text("Logout Confirmation"),
-            content: const Text(
-              "Are you sure you want to logout? You will need to login again.",
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context, false),
-                child: const Text("Cancel"),
-              ),
-              TextButton(
-                onPressed: () => Navigator.pop(context, true),
-                child: const Text(
-                  "Logout",
-                  style: TextStyle(color: Colors.red),
-                ),
-              ),
-            ],
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text("Logout Confirmation"),
+        content: const Text(
+          "Are you sure you want to logout? You will need to login again.",
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text("Cancel"),
           ),
-        ) ??
-        false;
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text("Logout", style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
 
-    if (confirm) {
-      _logout();
+    if (confirm == true) {
+      await _logout();
     }
   }
 
-  /// Logout function clears login state
   Future<void> _logout() async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.remove("loggedIn");
-    await prefs.remove("biometricEnabled");
+    await prefs.remove('loggedIn'); // keep biometrics
 
-    // Navigate back to LoginPage and remove all previous routes
+    if (!mounted) return;
+
     Navigator.pushAndRemoveUntil(
       context,
-      MaterialPageRoute(builder: (context) => const LoginPage()),
+      MaterialPageRoute(builder: (_) => const LoginPage()),
       (route) => false,
     );
   }
@@ -83,6 +76,7 @@ class _QRScannerPageState extends State<QRScannerPage> {
           if (code != null) {
             scanned = true;
 
+            if (!mounted) return;
             Navigator.push(
               context,
               MaterialPageRoute(

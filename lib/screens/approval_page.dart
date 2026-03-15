@@ -1,23 +1,49 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'login_page.dart'; // Make sure the path matches your project
+import 'login_page.dart';
 
 class ApprovalPage extends StatelessWidget {
   final Map<String, dynamic> transaction;
 
   const ApprovalPage({super.key, required this.transaction});
 
-  /// Clears login session and navigates to login page
   Future<void> _logout(BuildContext context) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.remove('loggedIn');
-    await prefs.remove('biometricEnabled');
+    await prefs.remove('loggedIn'); // keep biometrics
+
+    if (!context.mounted) return;
 
     Navigator.pushAndRemoveUntil(
       context,
       MaterialPageRoute(builder: (_) => const LoginPage()),
-      (route) => false, // Remove all previous routes
+      (route) => false,
     );
+  }
+
+  Future<void> _confirmLogout(BuildContext context) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text("Logout"),
+        content: const Text(
+          "Are you sure you want to logout? You will need to log in again.",
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text("Cancel"),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text("Logout"),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      await _logout(context);
+    }
   }
 
   @override
@@ -28,7 +54,8 @@ class ApprovalPage extends StatelessWidget {
         actions: [
           IconButton(
             icon: const Icon(Icons.logout),
-            onPressed: () => _logout(context),
+            tooltip: "Logout",
+            onPressed: () => _confirmLogout(context),
           ),
         ],
       ),
@@ -81,7 +108,6 @@ class ApprovalPage extends StatelessWidget {
                 ),
               ),
             ),
-            const Spacer(),
           ],
         ),
       ),

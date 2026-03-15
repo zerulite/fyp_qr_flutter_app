@@ -12,7 +12,6 @@ class LoginPage extends StatefulWidget {
 
 class _LoginPageState extends State<LoginPage> {
   final _formKey = GlobalKey<FormState>();
-
   final emailController = TextEditingController();
   final passwordController = TextEditingController();
   final LocalAuthentication auth = LocalAuthentication();
@@ -23,54 +22,66 @@ class _LoginPageState extends State<LoginPage> {
   @override
   void initState() {
     super.initState();
-    _checkLoginStatus();
+    _checkBiometricLogin();
   }
 
-  /// Check if user previously logged in and opted for biometrics
-  Future<void> _checkLoginStatus() async {
+  /// Check if biometrics should be offered
+  Future<void> _checkBiometricLogin() async {
     final prefs = await SharedPreferences.getInstance();
-    bool loggedIn = prefs.getBool("loggedIn") ?? false;
     bool biometricEnabled = prefs.getBool("biometricEnabled") ?? false;
+    bool hasLoggedInBefore = prefs.getBool("hasLoggedInBefore") ?? false;
+    String? lastUser = prefs.getString('lastUser');
 
-    // Only auto-trigger biometrics if both conditions are true
-    if (loggedIn && biometricEnabled) {
-      _biometricLogin();
+    if (biometricEnabled && hasLoggedInBefore && lastUser != null) {
+      if (!mounted) return;
+      await _biometricLogin();
     }
   }
 
-  /// Main login with email/password
   Future<void> _login() async {
     if (!_formKey.currentState!.validate()) return;
 
     setState(() => loading = true);
-
     await Future.delayed(const Duration(seconds: 2)); // simulate server delay
+    setState(() => loading = false);
 
     String email = emailController.text;
     String password = passwordController.text;
 
-    setState(() => loading = false);
-
+    // Replace with your real auth check
     if (email == "user@test.com" && password == "123456") {
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setBool("loggedIn", true);
+      String? lastUser = prefs.getString('lastUser');
 
-      // Ask user if they want to enable biometric login
+      // Reset biometric if a new user logs in
+      if (lastUser != null && lastUser != email) {
+        await prefs.setBool('biometricEnabled', false);
+      }
+
+      await prefs.setString('lastUser', email);
+      await prefs.setBool('loggedIn', true);
+      await prefs.setBool('hasLoggedInBefore', true);
+
       await _askEnableBiometric();
 
+      if (!mounted) return;
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(builder: (context) => const QRScannerPage()),
       );
     } else {
+      if (!mounted) return;
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(const SnackBar(content: Text("Invalid credentials")));
     }
   }
 
-  /// Ask the user if they want to enable biometric login
   Future<void> _askEnableBiometric() async {
+    final prefs = await SharedPreferences.getInstance();
+    bool alreadyEnabled = prefs.getBool('biometricEnabled') ?? false;
+    if (alreadyEnabled) return;
+
     bool enable =
         await showDialog(
           context: context,
@@ -94,32 +105,10 @@ class _LoginPageState extends State<LoginPage> {
         false;
 
     if (enable) {
-      final prefs = await SharedPreferences.getInstance();
       await prefs.setBool("biometricEnabled", true);
     }
   }
 
-  /// Only allow biometric login if user has previously logged in
-  Future<void> _handleBiometricLogin() async {
-    final prefs = await SharedPreferences.getInstance();
-    bool loggedIn = prefs.getBool("loggedIn") ?? false;
-    bool biometricEnabled = prefs.getBool("biometricEnabled") ?? false;
-
-    if (!loggedIn || !biometricEnabled) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            "You must log in with email/password first to use biometrics",
-          ),
-        ),
-      );
-      return;
-    }
-
-    await _biometricLogin();
-  }
-
-  /// Biometric login
   Future<void> _biometricLogin() async {
     try {
       bool authenticated = await auth.authenticate(
@@ -129,6 +118,8 @@ class _LoginPageState extends State<LoginPage> {
           stickyAuth: true,
         ),
       );
+
+      if (!mounted) return;
 
       if (authenticated) {
         Navigator.pushReplacement(
@@ -141,10 +132,30 @@ class _LoginPageState extends State<LoginPage> {
         );
       }
     } catch (e) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text("Biometric authentication not available")),
       );
     }
+  }
+
+  Future<void> _handleBiometricLogin() async {
+    final prefs = await SharedPreferences.getInstance();
+    bool biometricEnabled = prefs.getBool("biometricEnabled") ?? false;
+    String? lastUser = prefs.getString('lastUser');
+
+    if (!biometricEnabled || lastUser == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            "You must log in with email/password first to use biometrics",
+          ),
+        ),
+      );
+      return;
+    }
+
+    await _biometricLogin();
   }
 
   @override
@@ -239,7 +250,6 @@ class _LoginPageState extends State<LoginPage> {
                         ),
                       ),
                       const SizedBox(height: 15),
-                      // Biometric login now gated
                       ElevatedButton.icon(
                         icon: const Icon(Icons.fingerprint),
                         label: const Text("Login with Biometrics"),
