@@ -25,14 +25,19 @@ class _LoginPageState extends State<LoginPage> {
     _checkBiometricLogin();
   }
 
-  /// Check if biometrics should be offered
   Future<void> _checkBiometricLogin() async {
     final prefs = await SharedPreferences.getInstance();
     bool biometricEnabled = prefs.getBool("biometricEnabled") ?? false;
     bool hasLoggedInBefore = prefs.getBool("hasLoggedInBefore") ?? false;
+    bool loggedIn = prefs.getBool("loggedIn") ?? false; // session flag
     String? lastUser = prefs.getString('lastUser');
 
-    if (biometricEnabled && hasLoggedInBefore && lastUser != null) {
+    // Only auto-prompt if:
+    // 1. biometrics enabled
+    // 2. user has logged in before
+    // 3. lastUser exists
+    // 4. session is active (loggedIn true)
+    if (biometricEnabled && hasLoggedInBefore && lastUser != null && loggedIn) {
       if (!mounted) return;
       await _biometricLogin();
     }
@@ -262,6 +267,31 @@ class _LoginPageState extends State<LoginPage> {
                       TextButton(
                         onPressed: () {},
                         child: const Text("Forgot password?"),
+                      ),
+                      ElevatedButton(
+                        onPressed: () async {
+                          final prefs = await SharedPreferences.getInstance();
+                          await prefs
+                              .clear(); // completely reset all stored prefs
+                          if (!mounted) return;
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text(
+                                "App reset! All cached data cleared.",
+                              ),
+                            ),
+                          );
+                          emailController.clear();
+                          passwordController.clear();
+                        },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.red,
+                          padding: const EdgeInsets.all(16),
+                        ),
+                        child: const Text(
+                          "Debug: Clear Cache / Reset App",
+                          style: TextStyle(color: Colors.white),
+                        ),
                       ),
                     ],
                   ),
