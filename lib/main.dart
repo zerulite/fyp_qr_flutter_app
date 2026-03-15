@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:local_auth/local_auth.dart';
+import 'dart:convert';
 
 void main() {
   runApp(const MyApp());
@@ -71,63 +72,153 @@ class TransactionPage extends StatefulWidget {
 class _TransactionPageState extends State<TransactionPage> {
   final LocalAuthentication auth = LocalAuthentication();
 
-  Future<void> authenticate() async {
-    try {
-      bool authenticated = await auth.authenticate(
-        localizedReason: "Confirm transaction",
-        options: const AuthenticationOptions(
-          biometricOnly: false,
-          stickyAuth: true,
-        ),
-      );
+  late Map<String, dynamic> transaction;
 
-      if (authenticated) {
-        if (mounted) {
-          ScaffoldMessenger.of(
-            context,
-          ).showSnackBar(const SnackBar(content: Text("Payment Approved")));
-        }
-      } else {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text("Authentication Failed")),
-          );
-        }
-      }
+  @override
+  void initState() {
+    super.initState();
+
+    try {
+      transaction = jsonDecode(widget.qrData);
     } catch (e) {
-      print("Auth error: $e");
+      transaction = {"raw_data": widget.qrData};
     }
+  }
+
+  Future<void> authenticate() async {
+    bool authenticated = await auth.authenticate(
+      localizedReason: "Confirm transaction",
+      options: const AuthenticationOptions(
+        biometricOnly: false,
+        stickyAuth: true,
+      ),
+    );
+
+    if (authenticated) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text("Payment Approved")));
+      }
+    } else {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text("Authentication Failed")));
+      }
+    }
+  }
+
+  Widget transactionField(String title, dynamic value) {
+    if (value == null) return const SizedBox();
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 10),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              title,
+              style: const TextStyle(
+                fontWeight: FontWeight.bold,
+                color: Colors.grey,
+              ),
+            ),
+
+            const SizedBox(height: 6),
+
+            SelectableText(
+              value.toString(),
+              style: const TextStyle(fontSize: 14),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text("Confirm Transaction")),
+      appBar: AppBar(title: const Text("Confirm Payment")),
 
       body: Padding(
-        padding: const EdgeInsets.all(24),
+        padding: const EdgeInsets.all(20),
 
         child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             const Text(
-              "QR Data",
-              style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+              "Payment Confirmation",
+              style: TextStyle(fontSize: 26, fontWeight: FontWeight.bold),
+              textAlign: TextAlign.center,
+            ),
+
+            const SizedBox(height: 30),
+
+            Card(
+              elevation: 3,
+              child: Padding(
+                padding: const EdgeInsets.all(20),
+
+                child: Column(
+                  children: [
+                    Text(
+                      transaction["merchant"] ?? "Unknown Merchant",
+                      style: const TextStyle(
+                        fontSize: 22,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+
+                    const SizedBox(height: 10),
+
+                    Text(
+                      "${transaction["currency"] ?? ""} ${transaction["amount"] ?? ""}",
+                      style: const TextStyle(
+                        fontSize: 32,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.green,
+                      ),
+                    ),
+
+                    const SizedBox(height: 10),
+
+                    Text(
+                      "Transaction ID: ${transaction["transaction_id"] ?? ""}",
+                      style: const TextStyle(color: Colors.grey),
+                    ),
+                  ],
+                ),
+              ),
             ),
 
             const SizedBox(height: 20),
 
-            Text(
-              widget.qrData,
-              textAlign: TextAlign.center,
-              style: const TextStyle(fontSize: 18),
+            const Text(
+              "Encrypted Transaction Data",
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
             ),
 
-            const SizedBox(height: 40),
+            const SizedBox(height: 10),
 
-            ElevatedButton(
+            transactionField("Encrypted Key", transaction["encrypted_key"]),
+            transactionField("IV", transaction["iv"]),
+            transactionField("Ciphertext", transaction["ciphertext"]),
+            transactionField("Auth Tag", transaction["auth_tag"]),
+
+            const Spacer(),
+
+            ElevatedButton.icon(
+              icon: const Icon(Icons.fingerprint),
+              label: const Text("Authenticate & Pay"),
+              style: ElevatedButton.styleFrom(
+                padding: const EdgeInsets.all(16),
+              ),
               onPressed: authenticate,
-              child: const Text("Confirm Payment"),
             ),
           ],
         ),
