@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:local_auth/local_auth.dart';
 import 'dart:convert';
 import '../widgets/transaction_field.dart';
+import 'approval_page.dart';
 
 class TransactionPage extends StatefulWidget {
   final String qrData;
@@ -39,13 +40,19 @@ class _TransactionPageState extends State<TransactionPage> {
 
     if (!mounted) return;
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          authenticated ? "Payment Approved" : "Authentication Failed",
+    if (authenticated) {
+      // Navigate to ApprovalPage
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (context) => ApprovalPage(transaction: transaction),
         ),
-      ),
-    );
+      );
+    } else {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text("Authentication Failed")));
+    }
   }
 
   @override
