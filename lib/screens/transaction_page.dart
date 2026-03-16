@@ -32,10 +32,9 @@ class _TransactionPageState extends State<TransactionPage> {
   Future<void> authenticate() async {
     bool authenticated = await auth.authenticate(
       localizedReason: "Confirm transaction",
-      options: const AuthenticationOptions(
-        biometricOnly: false,
-        stickyAuth: true,
-      ),
+      biometricOnly: false, // allow PIN/passcode as fallback
+      sensitiveTransaction: true, // platform-specific security
+      persistAcrossBackgrounding: true, // retry if app goes to background
     );
 
     if (!mounted) return;
