@@ -1,11 +1,10 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'qr_scanner_page.dart';
+import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:local_auth/local_auth.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
+import 'qr_scanner_page.dart';
 import 'register_page.dart';
-import 'dart:convert';
-import 'package:http/http.dart' as http;
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -31,63 +30,58 @@ class _LoginPageState extends State<LoginPage> {
 
   Future<void> _checkBiometricLogin() async {
     final prefs = await SharedPreferences.getInstance();
-    final supabase = Supabase.instance.client;
-
     bool biometricEnabled = prefs.getBool("biometricEnabled") ?? false;
-    bool hasLoggedInBefore = prefs.getBool("hasLoggedInBefore") ?? false;
-    String? lastUser = prefs.getString("lastUser");
+    bool loggedIn = prefs.getBool("loggedIn") ?? false;
+    String? lastUser = prefs.getString('lastUser');
 
-    final session = supabase.auth.currentSession;
-
-    if (session != null &&
-        biometricEnabled &&
-        hasLoggedInBefore &&
-        lastUser != null) {
-      if (!mounted) return;
+    if (biometricEnabled && loggedIn && lastUser != null) {
       await _biometricLogin();
     }
   }
 
   Future<void> _login() async {
-    final supabase = Supabase.instance.client;
+    if (!_formKey.currentState!.validate()) return;
+
+    setState(() => loading = true);
 
     try {
-      final response = await supabase.auth.signInWithPassword(
-        email: emailController.text.trim(),
-        password: passwordController.text.trim(),
+      final response = await http.post(
+        Uri.parse(
+          'https://nurturing-renewal-production.up.railway.app/api/auth/login',
+        ),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'email': emailController.text.trim(),
+          'password': passwordController.text.trim(),
+        }),
       );
 
-      if (response.user != null) {
-        //final token = response.session?.accessToken;
+      setState(() => loading = false);
 
-        final apiResponse = await http.post(
-          Uri.parse(
-            'https://nurturing-renewal-production.up.railway.app/api/auth/login',
-          ),
-          headers: {'Content-Type': 'application/json'},
-          body: jsonEncode({
-            'email': emailController.text.trim(),
-            'password': passwordController.text.trim(),
-          }),
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        final token = data['access_token'] ?? '';
+
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setBool('loggedIn', true);
+        await prefs.setString('lastUser', emailController.text.trim());
+        await prefs.setString('token', token);
+
+        await _askEnableBiometric();
+
+        if (!mounted) return;
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (context) => const QRScannerPage()),
         );
-
-        if (apiResponse.statusCode == 200) {
-          final prefs = await SharedPreferences.getInstance();
-          await prefs.setBool('loggedIn', true);
-          await prefs.setString('lastUser', emailController.text.trim());
-
-          Navigator.pushReplacement(
-            context,
-            MaterialPageRoute(builder: (context) => const QRScannerPage()),
-          );
-        } else {
-          final error = jsonDecode(apiResponse.body);
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(error['message'] ?? 'API login failed')),
-          );
-        }
+      } else {
+        final error = jsonDecode(response.body);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(error['message'] ?? 'Login failed')),
+        );
       }
     } catch (e) {
+      setState(() => loading = false);
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text("Unexpected error: $e")));
@@ -96,8 +90,7 @@ class _LoginPageState extends State<LoginPage> {
 
   Future<void> _askEnableBiometric() async {
     final prefs = await SharedPreferences.getInstance();
-    bool alreadyEnabled = prefs.getBool("biometricEnabled") ?? false;
-
+    bool alreadyEnabled = prefs.getBool('biometricEnabled') ?? false;
     if (alreadyEnabled) return;
 
     bool enable =
@@ -159,7 +152,7 @@ class _LoginPageState extends State<LoginPage> {
   Future<void> _handleBiometricLogin() async {
     final prefs = await SharedPreferences.getInstance();
     bool biometricEnabled = prefs.getBool("biometricEnabled") ?? false;
-    String? lastUser = prefs.getString("lastUser");
+    String? lastUser = prefs.getString('lastUser');
 
     if (!biometricEnabled || lastUser == null) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -173,22 +166,6 @@ class _LoginPageState extends State<LoginPage> {
     }
 
     await _biometricLogin();
-  }
-
-  Future<void> _debugReset() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.clear();
-
-    await Supabase.instance.client.auth.signOut();
-
-    if (!mounted) return;
-
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(const SnackBar(content: Text("App reset. Cache cleared.")));
-
-    emailController.clear();
-    passwordController.clear();
   }
 
   @override
@@ -267,18 +244,14 @@ class _LoginPageState extends State<LoginPage> {
                           return null;
                         },
                       ),
-
                       const SizedBox(height: 30),
-
                       SizedBox(
                         width: double.infinity,
-
                         child: ElevatedButton(
                           onPressed: loading ? null : _login,
                           style: ElevatedButton.styleFrom(
                             padding: const EdgeInsets.all(16),
                           ),
-
                           child: loading
                               ? const CircularProgressIndicator(
                                   color: Colors.white,
@@ -286,17 +259,16 @@ class _LoginPageState extends State<LoginPage> {
                               : const Text("Login"),
                         ),
                       ),
-
                       const SizedBox(height: 15),
-
                       ElevatedButton.icon(
                         icon: const Icon(Icons.fingerprint),
                         label: const Text("Login with Biometrics"),
+                        style: ElevatedButton.styleFrom(
+                          padding: const EdgeInsets.all(16),
+                        ),
                         onPressed: _handleBiometricLogin,
                       ),
-
-                      const SizedBox(height: 10),
-
+                      const SizedBox(height: 15),
                       TextButton(
                         onPressed: () {
                           Navigator.push(
@@ -306,18 +278,29 @@ class _LoginPageState extends State<LoginPage> {
                             ),
                           );
                         },
-                        child: const Text("Create Account"),
+                        child: const Text("Don't have an account? Register"),
                       ),
-
-                      const SizedBox(height: 10),
-
                       ElevatedButton(
-                        onPressed: _debugReset,
+                        onPressed: () async {
+                          final prefs = await SharedPreferences.getInstance();
+                          await prefs.clear();
+                          if (!mounted) return;
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text(
+                                "App reset! All cached data cleared.",
+                              ),
+                            ),
+                          );
+                          emailController.clear();
+                          passwordController.clear();
+                        },
                         style: ElevatedButton.styleFrom(
                           backgroundColor: Colors.red,
+                          padding: const EdgeInsets.all(16),
                         ),
                         child: const Text(
-                          "Debug Reset App",
+                          "Debug: Clear Cache / Reset App",
                           style: TextStyle(color: Colors.white),
                         ),
                       ),

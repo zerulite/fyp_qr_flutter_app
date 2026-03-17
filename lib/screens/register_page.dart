@@ -1,7 +1,7 @@
-import 'package:flutter/material.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 import 'dart:convert';
+import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'login_page.dart';
 
 class RegisterPage extends StatefulWidget {
   const RegisterPage({super.key});
@@ -12,54 +12,59 @@ class RegisterPage extends StatefulWidget {
 
 class _RegisterPageState extends State<RegisterPage> {
   final _formKey = GlobalKey<FormState>();
-
   final emailController = TextEditingController();
-  final phoneController = TextEditingController();
   final passwordController = TextEditingController();
   final confirmPasswordController = TextEditingController();
-
+  final phoneController = TextEditingController();
   bool obscurePassword = true;
-  bool obscureConfirmPassword = true;
   bool loading = false;
 
   Future<void> _register() async {
-    final supabase = Supabase.instance.client;
+    if (!_formKey.currentState!.validate()) return;
+
+    if (passwordController.text != confirmPasswordController.text) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text("Passwords do not match")));
+      return;
+    }
+
+    setState(() => loading = true);
 
     try {
-      final response = await supabase.auth.signUp(
-        email: emailController.text.trim(),
-        password: passwordController.text.trim(),
+      final response = await http.post(
+        Uri.parse(
+          'https://nurturing-renewal-production.up.railway.app/api/auth/register',
+        ),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'email': emailController.text.trim(),
+          'password': passwordController.text.trim(),
+          'phone_number': phoneController.text.trim(),
+        }),
       );
 
-      if (response.user != null) {
-        final apiResponse = await http.post(
-          Uri.parse(
-            'https://nurturing-renewal-production.up.railway.app/api/auth/register',
-          ),
-          headers: {'Content-Type': 'application/json'},
-          body: jsonEncode({
-            'email': emailController.text.trim(),
-            'password': passwordController.text.trim(),
-            'phone_number': phoneController.text,
-          }),
-        );
+      setState(() => loading = false);
 
-        if (apiResponse.statusCode == 200 || apiResponse.statusCode == 201) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text("Registration successful! Please login."),
-            ),
-          );
-        } else {
-          final error = jsonDecode(apiResponse.body);
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(error['message'] ?? 'API registration failed'),
-            ),
-          );
-        }
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("Registration successful! Please login."),
+          ),
+        );
+        if (!mounted) return;
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (context) => const LoginPage()),
+        );
+      } else {
+        final error = jsonDecode(response.body);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(error['message'] ?? 'Registration failed')),
+        );
       }
     } catch (e) {
+      setState(() => loading = false);
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text("Unexpected error: $e")));
@@ -70,7 +75,6 @@ class _RegisterPageState extends State<RegisterPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.grey[100],
-      appBar: AppBar(title: const Text("Create Account"), centerTitle: true),
       body: Center(
         child: SingleChildScrollView(
           child: Padding(
@@ -88,7 +92,7 @@ class _RegisterPageState extends State<RegisterPage> {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       const Icon(
-                        Icons.person_add,
+                        Icons.app_registration,
                         size: 60,
                         color: Colors.blue,
                       ),
@@ -101,8 +105,6 @@ class _RegisterPageState extends State<RegisterPage> {
                         ),
                       ),
                       const SizedBox(height: 30),
-
-                      // Email
                       TextFormField(
                         controller: emailController,
                         decoration: const InputDecoration(
@@ -110,39 +112,41 @@ class _RegisterPageState extends State<RegisterPage> {
                           prefixIcon: Icon(Icons.email),
                           border: OutlineInputBorder(),
                         ),
-                        validator: (value) {
-                          if (value == null || value.isEmpty) {
-                            return "Enter your email";
-                          }
-                          return null;
-                        },
+                        validator: (value) => value == null || value.isEmpty
+                            ? "Enter your email"
+                            : null,
                       ),
                       const SizedBox(height: 20),
-
-                      // Phone number
                       TextFormField(
                         controller: phoneController,
-                        keyboardType: TextInputType.phone,
                         decoration: const InputDecoration(
                           labelText: "Phone Number",
                           prefixIcon: Icon(Icons.phone),
                           border: OutlineInputBorder(),
                         ),
-                        validator: (value) {
-                          if (value == null || value.isEmpty) {
-                            return "Enter your phone number";
-                          }
-                          return null;
-                        },
+                        validator: (value) => value == null || value.isEmpty
+                            ? "Enter phone number"
+                            : null,
                       ),
                       const SizedBox(height: 20),
-
-                      // Password
                       TextFormField(
                         controller: passwordController,
                         obscureText: obscurePassword,
                         decoration: InputDecoration(
                           labelText: "Password",
+                          prefixIcon: const Icon(Icons.lock),
+                          border: const OutlineInputBorder(),
+                        ),
+                        validator: (value) => value == null || value.isEmpty
+                            ? "Enter your password"
+                            : null,
+                      ),
+                      const SizedBox(height: 20),
+                      TextFormField(
+                        controller: confirmPasswordController,
+                        obscureText: obscurePassword,
+                        decoration: InputDecoration(
+                          labelText: "Confirm Password",
                           prefixIcon: const Icon(Icons.lock),
                           suffixIcon: IconButton(
                             icon: Icon(
@@ -158,47 +162,11 @@ class _RegisterPageState extends State<RegisterPage> {
                           ),
                           border: const OutlineInputBorder(),
                         ),
-                        validator: (value) {
-                          if (value == null || value.length < 6) {
-                            return "Password must be at least 6 characters";
-                          }
-                          return null;
-                        },
-                      ),
-                      const SizedBox(height: 20),
-
-                      // Confirm Password
-                      TextFormField(
-                        controller: confirmPasswordController,
-                        obscureText: obscureConfirmPassword,
-                        decoration: InputDecoration(
-                          labelText: "Confirm Password",
-                          prefixIcon: const Icon(Icons.lock),
-                          suffixIcon: IconButton(
-                            icon: Icon(
-                              obscureConfirmPassword
-                                  ? Icons.visibility
-                                  : Icons.visibility_off,
-                            ),
-                            onPressed: () {
-                              setState(() {
-                                obscureConfirmPassword =
-                                    !obscureConfirmPassword;
-                              });
-                            },
-                          ),
-                          border: const OutlineInputBorder(),
-                        ),
-                        validator: (value) {
-                          if (value == null || value.isEmpty) {
-                            return "Confirm your password";
-                          }
-                          return null;
-                        },
+                        validator: (value) => value == null || value.isEmpty
+                            ? "Confirm your password"
+                            : null,
                       ),
                       const SizedBox(height: 30),
-
-                      // Register button
                       SizedBox(
                         width: double.infinity,
                         child: ElevatedButton(
@@ -212,15 +180,6 @@ class _RegisterPageState extends State<RegisterPage> {
                                 )
                               : const Text("Register"),
                         ),
-                      ),
-
-                      const SizedBox(height: 15),
-
-                      TextButton(
-                        onPressed: () {
-                          Navigator.pop(context);
-                        },
-                        child: const Text("Already have an account? Login"),
                       ),
                     ],
                   ),
