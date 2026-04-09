@@ -51,21 +51,35 @@ class _LoginPageState extends State<LoginPage> {
         ),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
-          'email': emailController.text.trim(),
-          'password': passwordController.text.trim(),
+          "email": emailController.text.trim(),
+          "password": passwordController.text.trim(),
         }),
       );
 
-      setState(() => loading = false);
+      //setState(() => loading = false);
+
+      print("Response Status: ${response.statusCode}");
+      print("Response Body: ${response.body}");
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
-        final token = data['access_token'] ?? '';
+        print('LOGIN RESPONSE: $data'); // Debug
+
+        final token = data['access_token'] ?? data['token'];
+        if (token == null || token.isEmpty) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text("Login succeeded but no token returned"),
+            ),
+          );
+          return;
+        }
 
         final prefs = await SharedPreferences.getInstance();
         await prefs.setBool('loggedIn', true);
         await prefs.setString('lastUser', emailController.text.trim());
         await prefs.setString('token', token);
+        print('Token saved: $token');
 
         await _askEnableBiometric();
 
@@ -115,9 +129,7 @@ class _LoginPageState extends State<LoginPage> {
         ) ??
         false;
 
-    if (enable) {
-      await prefs.setBool("biometricEnabled", true);
-    }
+    if (enable) await prefs.setBool("biometricEnabled", true);
   }
 
   Future<void> _biometricLogin() async {
@@ -209,12 +221,9 @@ class _LoginPageState extends State<LoginPage> {
                           prefixIcon: Icon(Icons.email),
                           border: OutlineInputBorder(),
                         ),
-                        validator: (value) {
-                          if (value == null || value.isEmpty) {
-                            return "Enter your email";
-                          }
-                          return null;
-                        },
+                        validator: (value) => value == null || value.isEmpty
+                            ? "Enter your email"
+                            : null,
                       ),
                       const SizedBox(height: 20),
                       TextFormField(
@@ -230,19 +239,16 @@ class _LoginPageState extends State<LoginPage> {
                                   : Icons.visibility_off,
                             ),
                             onPressed: () {
-                              setState(() {
-                                obscurePassword = !obscurePassword;
-                              });
+                              setState(
+                                () => obscurePassword = !obscurePassword,
+                              );
                             },
                           ),
                           border: const OutlineInputBorder(),
                         ),
-                        validator: (value) {
-                          if (value == null || value.isEmpty) {
-                            return "Enter your password";
-                          }
-                          return null;
-                        },
+                        validator: (value) => value == null || value.isEmpty
+                            ? "Enter your password"
+                            : null,
                       ),
                       const SizedBox(height: 30),
                       SizedBox(
@@ -279,30 +285,6 @@ class _LoginPageState extends State<LoginPage> {
                           );
                         },
                         child: const Text("Don't have an account? Register"),
-                      ),
-                      ElevatedButton(
-                        onPressed: () async {
-                          final prefs = await SharedPreferences.getInstance();
-                          await prefs.clear();
-                          if (!mounted) return;
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text(
-                                "App reset! All cached data cleared.",
-                              ),
-                            ),
-                          );
-                          emailController.clear();
-                          passwordController.clear();
-                        },
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.red,
-                          padding: const EdgeInsets.all(16),
-                        ),
-                        child: const Text(
-                          "Debug: Clear Cache / Reset App",
-                          style: TextStyle(color: Colors.white),
-                        ),
                       ),
                     ],
                   ),
