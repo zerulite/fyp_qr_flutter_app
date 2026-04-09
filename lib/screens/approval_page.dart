@@ -82,27 +82,71 @@ class ApprovalPage extends StatelessWidget {
               child: Padding(
                 padding: const EdgeInsets.all(20),
                 child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    // Message
                     Text(
-                      transaction["merchant"] ?? "Unknown Merchant",
+                      transaction["message"] ?? "Transaction Completed",
                       style: const TextStyle(
-                        fontSize: 22,
+                        fontSize: 18,
                         fontWeight: FontWeight.bold,
                       ),
                     ),
-                    const SizedBox(height: 10),
-                    Text(
-                      "${transaction["currency"] ?? ""} ${transaction["amount"] ?? ""}",
-                      style: const TextStyle(
-                        fontSize: 32,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.green,
-                      ),
+
+                    const SizedBox(height: 15),
+
+                    // Status
+                    Row(
+                      children: [
+                        const Text(
+                          "Status: ",
+                          style: TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                        Text(
+                          transaction["status"] ?? "Unknown",
+                          style: TextStyle(
+                            color: transaction["status"] == "approved"
+                                ? Colors.green
+                                : Colors.orange,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ],
                     ),
-                    const SizedBox(height: 10),
+
+                    const SizedBox(height: 15),
+
+                    // Transaction ID
                     Text(
                       "Transaction ID: ${transaction["transaction_id"] ?? ""}",
                       style: const TextStyle(color: Colors.grey),
+                    ),
+
+                    const SizedBox(height: 10),
+
+                    // QR Session ID
+                    Text(
+                      "QR Session ID: ${transaction["qr_session_id"] ?? ""}",
+                      style: const TextStyle(color: Colors.grey),
+                    ),
+
+                    const SizedBox(height: 20),
+
+                    // Remaining Balance
+                    Text(
+                      "Remaining Balance",
+                      style: TextStyle(fontSize: 16, color: Colors.grey[600]),
+                    ),
+
+                    const SizedBox(height: 5),
+
+                    Text(
+                      "${transaction["remaining_balance"] ?? "0"}",
+                      style: const TextStyle(
+                        fontSize: 28,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.blue,
+                      ),
                     ),
                   ],
                 ),

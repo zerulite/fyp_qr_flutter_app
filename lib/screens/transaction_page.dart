@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:local_auth/local_auth.dart';
 import 'dart:convert';
+import 'package:http/http.dart' as http;
+
 import '../widgets/transaction_field.dart';
 import 'approval_page.dart';
 
@@ -17,6 +19,7 @@ class _TransactionPageState extends State<TransactionPage> {
   final LocalAuthentication auth = LocalAuthentication();
 
   late Map<String, dynamic> transaction;
+  bool isLoading = false;
 
   @override
   void initState() {
@@ -29,28 +32,68 @@ class _TransactionPageState extends State<TransactionPage> {
     }
   }
 
-  Future<void> authenticate() async {
+  // 🔐 AUTH + APPROVE FLOW
+  Future<void> authenticateAndApprove() async {
     bool authenticated = await auth.authenticate(
       localizedReason: "Confirm transaction",
-      biometricOnly: false, // allow PIN/passcode as fallback
-      sensitiveTransaction: true, // platform-specific security
-      persistAcrossBackgrounding: true, // retry if app goes to background
+      biometricOnly: false,
+      sensitiveTransaction: true,
+      persistAcrossBackgrounding: true,
     );
 
     if (!mounted) return;
 
     if (authenticated) {
-      // Navigate to ApprovalPage
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(
-          builder: (context) => ApprovalPage(transaction: transaction),
-        ),
-      );
+      await _sendDecision("APPROVE");
     } else {
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(const SnackBar(content: Text("Authentication Failed")));
+    }
+  }
+
+  // ❌ REJECT FLOW (no biometric)
+  Future<void> rejectTransaction() async {
+    await _sendDecision("REJECT");
+  }
+
+  // 🌐 API CALL
+  Future<void> _sendDecision(String action) async {
+    setState(() => isLoading = true);
+
+    try {
+      final response = await http.post(
+        Uri.parse(
+          "https://nurturing-renewal-production.up.railway.app/api/payments/decision",
+        ),
+        headers: {"Content-Type": "application/json"},
+        body: jsonEncode({
+          "transaction_id": transaction["transaction_id"],
+          "qr_session_id": transaction["qr_session_id"],
+          "action": action,
+        }),
+      );
+
+      final data = jsonDecode(response.body);
+
+      if (!mounted) return;
+
+      if (response.statusCode == 200) {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (context) => ApprovalPage(transaction: data),
+          ),
+        );
+      } else {
+        throw Exception(data["message"] ?? "Request failed");
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text("Error: $e")));
+    } finally {
+      if (mounted) setState(() => isLoading = false);
     }
   }
 
@@ -71,6 +114,7 @@ class _TransactionPageState extends State<TransactionPage> {
 
             const SizedBox(height: 30),
 
+            // 💳 MAIN CARD
             Card(
               elevation: 3,
               child: Padding(
@@ -78,7 +122,7 @@ class _TransactionPageState extends State<TransactionPage> {
                 child: Column(
                   children: [
                     Text(
-                      transaction["merchant"] ?? "Unknown Merchant",
+                      transaction["merchant_reference"] ?? "Unknown Merchant",
                       style: const TextStyle(
                         fontSize: 22,
                         fontWeight: FontWeight.bold,
@@ -109,28 +153,42 @@ class _TransactionPageState extends State<TransactionPage> {
 
             const SizedBox(height: 20),
 
-            const Text(
-              "Encrypted Transaction Data",
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            // 📋 DETAILS
+            TransactionField("QR Session Id", transaction["qr_session_id"]),
+            TransactionField(
+              "Sender Account Id",
+              transaction["sender_account_id"],
             ),
-
-            const SizedBox(height: 10),
-
-            TransactionField("Encrypted Key", transaction["encrypted_key"]),
-            TransactionField("IV", transaction["iv"]),
-            TransactionField("Ciphertext", transaction["ciphertext"]),
-            TransactionField("Auth Tag", transaction["auth_tag"]),
+            TransactionField("Date", transaction["created_at"]),
 
             const Spacer(),
 
-            ElevatedButton.icon(
-              icon: const Icon(Icons.fingerprint),
-              label: const Text("Authenticate & Pay"),
-              style: ElevatedButton.styleFrom(
-                padding: const EdgeInsets.all(16),
+            // 🔄 LOADING INDICATOR
+            if (isLoading) const Center(child: CircularProgressIndicator()),
+
+            if (!isLoading) ...[
+              // ✅ APPROVE BUTTON
+              ElevatedButton.icon(
+                icon: const Icon(Icons.fingerprint),
+                label: const Text("Authenticate & Pay"),
+                style: ElevatedButton.styleFrom(
+                  padding: const EdgeInsets.all(16),
+                ),
+                onPressed: authenticateAndApprove,
               ),
-              onPressed: authenticate,
-            ),
+
+              const SizedBox(height: 10),
+
+              // ❌ REJECT BUTTON
+              ElevatedButton(
+                onPressed: rejectTransaction,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.red,
+                  padding: const EdgeInsets.all(16),
+                ),
+                child: const Text("Reject"),
+              ),
+            ],
           ],
         ),
       ),
