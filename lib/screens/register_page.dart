@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'login_page.dart';
 
+import '../security/crypto_service.dart';
+
 class RegisterPage extends StatefulWidget {
   const RegisterPage({super.key});
 
@@ -32,6 +34,12 @@ class _RegisterPageState extends State<RegisterPage> {
     setState(() => loading = true);
 
     try {
+      // ---------- crypto start ----------
+      final keyPair = CryptoService.generateRSAKeyPair();
+      await CryptoService.savePrivateKey(keyPair.privateKey);
+      final pubKeyStr = CryptoService.formatPublicKey(keyPair.publicKey);
+      // ----------- crypto end -----------
+      
       final response = await http.post(
         Uri.parse(
           'https://nurturing-renewal-production.up.railway.app/api/auth/register',
@@ -41,6 +49,7 @@ class _RegisterPageState extends State<RegisterPage> {
           'email': emailController.text.trim(),
           'password': passwordController.text.trim(),
           'phone_number': phoneController.text.trim(),
+          'public_key': pubKeyStr, // add in public key for send back package
         }),
       );
 
@@ -52,12 +61,15 @@ class _RegisterPageState extends State<RegisterPage> {
             content: Text("Registration successful! Please login."),
           ),
         );
+
         if (!mounted) return;
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(builder: (context) => const LoginPage()),
         );
-      } else {
+      } 
+      
+      else {
         final error = jsonDecode(response.body);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text(error['message'] ?? 'Registration failed')),

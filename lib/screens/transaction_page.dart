@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:local_auth/local_auth.dart';
 import 'approval_page.dart';
+import '../security/crypto_service.dart';
 
 class TransactionPage extends StatefulWidget {
   final String qrData;
@@ -26,11 +27,27 @@ class _TransactionPageState extends State<TransactionPage> {
   }
 
   /// Parse QR code: tries JSON first, else parses key: value pairs
-  void _parseQRData() {
+  void _parseQRData() async{
     transaction = {};
     try {
       transaction = jsonDecode(widget.qrData);
-      print(transaction);
+
+      // decode base64 (require update from qr_session)
+      final encAESKey = base64Decode(transaction["encAES"]);
+      final iv = base64Decode(transaction["initial_vector"]);
+      final ciphertext = base64Decode(transaction["cipher"]);
+
+      // ! Add biometric before this (access private key)
+      // access private key
+      final privateKey = await CryptoService.getPrivateKey();
+      if (privateKey == null) throw Exception("Lost Private key");
+      
+      // decrypt AES key with RSA private
+      final rawAESKey = CryptoService.decryptAESKeyWithRSA(privateKey, encAESKey);
+
+      // decrypt ciphertext with AES key => get transaction plain text
+      final plaintext = CryptoService.decryptPayloadWithAES(rawAESKey, iv, ciphertext);
+      print(plaintext);
     } catch (e) {
       final pairs = widget.qrData.split(",");
       for (var pair in pairs) {
@@ -46,31 +63,37 @@ class _TransactionPageState extends State<TransactionPage> {
   }
 
   /// Send approval/rejection request to backend
-  Future<void> _sendDecision(String action) async {
-    setState(() => isLoading = true);
+  Future<void> _sendDecision({
+      required String action, 
+      required String signature, 
+      required String hash
+    }) async {
+      setState(() => isLoading = true);
 
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('token') ?? '';
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        final token = prefs.getString('token') ?? '';
 
-      if (token.isEmpty) {
-        throw Exception('No token found. Please log in first.');
-      }
+        if (token.isEmpty) {
+          throw Exception('No token found. Please log in first.');
+        }
 
-      final response = await http.post(
-        Uri.parse(
-          "https://nurturing-renewal-production.up.railway.app/api/payments/decision/",
-        ),
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": "Bearer $token",
-        },
-        body: jsonEncode({
+        final Map<String, dynamic> requestBody = {
           "transaction_id": transaction["transaction_id"],
           "qr_session_id": transaction["qr_session_id"],
           "action": action,
-        }),
-      );
+          "signature": signature, 
+          "hash": hash,           
+        };
+
+        final response = await http.post(
+          Uri.parse("https://nurturing-renewal-production.up.railway.app/api/payments/decision/"),
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": "Bearer $token",
+          },
+          body: jsonEncode(requestBody),
+        );
 
       print("STATUS: ${response.statusCode}");
       print("BODY: ${response.body}");
@@ -102,7 +125,7 @@ class _TransactionPageState extends State<TransactionPage> {
   }
 
   /// Authenticate user via biometrics before sending decision
-  Future<void> _authenticateAndSend(String action) async {
+  Future<void> _authenticateAndSend(String action, String plaintext) async {
     try {
       bool authenticated = await auth.authenticate(
         localizedReason: "Confirm transaction",
@@ -114,7 +137,19 @@ class _TransactionPageState extends State<TransactionPage> {
       if (!mounted) return;
 
       if (authenticated) {
-        await _sendDecision(action);
+        // access private key
+        final privateKey = await CryptoService.getPrivateKey();
+        if (privateKey == null) return;
+
+        // sign content: transaction_id + decision
+        String signContent = "${transaction["transaction_id"]}|$action";
+
+        // generate hash and signature
+        final signature = CryptoService.signData(privateKey, signContent);
+        final hashDigest = CryptoService.getHash(signContent);
+
+        // send decision, sign, hash back to server
+        await _sendDecision(action: action, signature: signature, hash: hashDigest);
       } else {
         ScaffoldMessenger.of(
           context,
@@ -195,7 +230,7 @@ class _TransactionPageState extends State<TransactionPage> {
               ),
               onPressed: isLoading
                   ? null
-                  : () => _authenticateAndSend("APPROVE"),
+                  : () => _authenticateAndSend("APPROVE", transaction["transaction_id"].toString()),
             ),
 
             const SizedBox(height: 10),
@@ -210,7 +245,7 @@ class _TransactionPageState extends State<TransactionPage> {
               ),
               onPressed: isLoading
                   ? null
-                  : () => _authenticateAndSend("REJECT"),
+                  : () => _authenticateAndSend("REJECT", transaction["transaction_id"].toString()),
             ),
 
             if (isLoading)
