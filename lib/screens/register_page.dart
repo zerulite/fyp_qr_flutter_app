@@ -39,11 +39,9 @@ class _RegisterPageState extends State<RegisterPage> {
       await CryptoService.savePrivateKey(keyPair.privateKey);
       final pubKeyStr = CryptoService.formatPublicKey(keyPair.publicKey);
       // ----------- crypto end -----------
-      
+
       final response = await http.post(
-        Uri.parse(
-          'https://nurturing-renewal-production.up.railway.app/api/auth/register',
-        ),
+        Uri.parse('https://fyp-bank-backend.onrender.com/api/auth/register'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
           'email': emailController.text.trim(),
@@ -67,9 +65,7 @@ class _RegisterPageState extends State<RegisterPage> {
           context,
           MaterialPageRoute(builder: (context) => const LoginPage()),
         );
-      } 
-      
-      else {
+      } else {
         final error = jsonDecode(response.body);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text(error['message'] ?? 'Registration failed')),

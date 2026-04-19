@@ -27,7 +27,7 @@ class _TransactionPageState extends State<TransactionPage> {
   }
 
   /// Parse QR code: tries JSON first, else parses key: value pairs
-  void _parseQRData() async{
+  void _parseQRData() async {
     transaction = {};
     try {
       transaction = jsonDecode(widget.qrData);
@@ -41,12 +41,19 @@ class _TransactionPageState extends State<TransactionPage> {
       // access private key
       final privateKey = await CryptoService.getPrivateKey();
       if (privateKey == null) throw Exception("Lost Private key");
-      
+
       // decrypt AES key with RSA private
-      final rawAESKey = CryptoService.decryptAESKeyWithRSA(privateKey, encAESKey);
+      final rawAESKey = CryptoService.decryptAESKeyWithRSA(
+        privateKey,
+        encAESKey,
+      );
 
       // decrypt ciphertext with AES key => get transaction plain text
-      final plaintext = CryptoService.decryptPayloadWithAES(rawAESKey, iv, ciphertext);
+      final plaintext = CryptoService.decryptPayloadWithAES(
+        rawAESKey,
+        iv,
+        ciphertext,
+      );
       print(plaintext);
     } catch (e) {
       final pairs = widget.qrData.split(",");
@@ -64,36 +71,38 @@ class _TransactionPageState extends State<TransactionPage> {
 
   /// Send approval/rejection request to backend
   Future<void> _sendDecision({
-      required String action, 
-      required String signature, 
-      required String hash
-    }) async {
-      setState(() => isLoading = true);
+    required String action,
+    required String signature,
+    required String hash,
+  }) async {
+    setState(() => isLoading = true);
 
-      try {
-        final prefs = await SharedPreferences.getInstance();
-        final token = prefs.getString('token') ?? '';
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final token = prefs.getString('token') ?? '';
 
-        if (token.isEmpty) {
-          throw Exception('No token found. Please log in first.');
-        }
+      if (token.isEmpty) {
+        throw Exception('No token found. Please log in first.');
+      }
 
-        final Map<String, dynamic> requestBody = {
-          "transaction_id": transaction["transaction_id"],
-          "qr_session_id": transaction["qr_session_id"],
-          "action": action,
-          "signature": signature, 
-          "hash": hash,           
-        };
+      final Map<String, dynamic> requestBody = {
+        "transaction_id": transaction["transaction_id"],
+        "qr_session_id": transaction["qr_session_id"],
+        "action": action,
+        "signature": signature,
+        "hash": hash,
+      };
 
-        final response = await http.post(
-          Uri.parse("https://nurturing-renewal-production.up.railway.app/api/payments/decision/"),
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": "Bearer $token",
-          },
-          body: jsonEncode(requestBody),
-        );
+      final response = await http.post(
+        Uri.parse(
+          "https://nurturing-renewal-production.up.railway.app/api/payments/decision/",
+        ),
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": "Bearer $token",
+        },
+        body: jsonEncode(requestBody),
+      );
 
       print("STATUS: ${response.statusCode}");
       print("BODY: ${response.body}");
@@ -149,7 +158,11 @@ class _TransactionPageState extends State<TransactionPage> {
         final hashDigest = CryptoService.getHash(signContent);
 
         // send decision, sign, hash back to server
-        await _sendDecision(action: action, signature: signature, hash: hashDigest);
+        await _sendDecision(
+          action: action,
+          signature: signature,
+          hash: hashDigest,
+        );
       } else {
         ScaffoldMessenger.of(
           context,
@@ -230,7 +243,10 @@ class _TransactionPageState extends State<TransactionPage> {
               ),
               onPressed: isLoading
                   ? null
-                  : () => _authenticateAndSend("APPROVE", transaction["transaction_id"].toString()),
+                  : () => _authenticateAndSend(
+                      "APPROVE",
+                      transaction["transaction_id"].toString(),
+                    ),
             ),
 
             const SizedBox(height: 10),
@@ -245,7 +261,10 @@ class _TransactionPageState extends State<TransactionPage> {
               ),
               onPressed: isLoading
                   ? null
-                  : () => _authenticateAndSend("REJECT", transaction["transaction_id"].toString()),
+                  : () => _authenticateAndSend(
+                      "REJECT",
+                      transaction["transaction_id"].toString(),
+                    ),
             ),
 
             if (isLoading)
