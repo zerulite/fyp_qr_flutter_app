@@ -33,9 +33,7 @@ class _RegisterPageState extends State<RegisterPage> {
 
     try {
       final response = await http.post(
-        Uri.parse(
-          'https://nurturing-renewal-production.up.railway.app/api/auth/register',
-        ),
+        Uri.parse('https://fyp-bank-backend.onrender.com/api/auth/register'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
           'email': emailController.text.trim(),

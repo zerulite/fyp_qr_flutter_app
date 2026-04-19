@@ -46,9 +46,7 @@ class _LoginPageState extends State<LoginPage> {
 
     try {
       final response = await http.post(
-        Uri.parse(
-          'https://nurturing-renewal-production.up.railway.app/api/auth/login',
-        ),
+        Uri.parse('https://fyp-bank-backend.onrender.com/api/auth/login'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
           "email": emailController.text.trim(),
