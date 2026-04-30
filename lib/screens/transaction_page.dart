@@ -112,6 +112,36 @@ class _TransactionPageState extends State<TransactionPage> {
   /// Authenticate user via biometrics before sending decision
   Future<void> _authenticateAndSend(String action) async {
     try {
+      // Parse amount safely
+      final amount = double.tryParse(transaction["amount"].toString()) ?? 0.0;
+
+      // Step 1: show popup BEFORE biometrics (only for high value approvals)
+      if (action == "APPROVE" && amount > 5000) {
+        final confirm = await showDialog<bool>(
+          context: context,
+          barrierDismissible: false,
+          builder: (dialogContext) => AlertDialog(
+            title: const Text("High Value Transaction"),
+            content: Text(
+              "This transaction is ${transaction["currency"] ?? ""} ${amount.toStringAsFixed(2)}.\n\nProceed to authentication?",
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, false),
+                child: const Text("Cancel"),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, true),
+                child: const Text("Continue"),
+              ),
+            ],
+          ),
+        );
+
+        if (confirm != true) return;
+      }
+
+      // Step 2: biometric authentication
       bool authenticated = await auth.authenticate(
         localizedReason: "Confirm transaction",
         biometricOnly: false,
@@ -121,13 +151,15 @@ class _TransactionPageState extends State<TransactionPage> {
 
       if (!mounted) return;
 
-      if (authenticated) {
-        await _sendDecision(action);
-      } else {
+      if (!authenticated) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(const SnackBar(content: Text("Authentication failed")));
+        return;
       }
+
+      // Step 3: send request
+      await _sendDecision(action);
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(
