@@ -4,7 +4,7 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:local_auth/local_auth.dart';
 import 'approval_page.dart';
-
+import 'rejection_page.dart';
 class TransactionPage extends StatefulWidget {
   final String qrData;
 
@@ -81,11 +81,17 @@ class _TransactionPageState extends State<TransactionPage> {
       if (!mounted) return;
 
       if (response.statusCode == 200) {
-        // Navigate to ApprovalPage with backend response
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (_) => ApprovalPage(transaction: data)),
-        );
+        if (action == "APPROVE") {
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(builder: (_) => ApprovalPage(transaction: data)),
+          );
+        } else {
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(builder: (_) => RejectedPage(transaction: data)),
+          );
+        }
       } else {
         throw Exception(data["message"] ?? "Request failed");
       }
