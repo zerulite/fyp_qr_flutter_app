@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'login_page.dart';
+import 'package:intl/intl.dart';
 
 class ApprovalPage extends StatelessWidget {
   final Map<String, dynamic> transaction;
@@ -141,7 +142,10 @@ class ApprovalPage extends StatelessWidget {
                     const SizedBox(height: 5),
 
                     Text(
-                      "${transaction["remaining_balance"] ?? "0"}",
+                      NumberFormat('#,##0.00').format(
+                        (transaction["remaining_balance"] as num? ?? 0)
+                            .toDouble(),
+                      ),
                       style: const TextStyle(
                         fontSize: 28,
                         fontWeight: FontWeight.bold,
