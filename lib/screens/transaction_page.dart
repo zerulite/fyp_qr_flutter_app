@@ -1,10 +1,11 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
-import 'package:shared_preferences/shared_preferences.dart';
+//import 'package:shared_preferences/shared_preferences.dart';
 import 'package:local_auth/local_auth.dart';
 import 'approval_page.dart';
 import 'rejection_page.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 class TransactionPage extends StatefulWidget {
   final String qrData;
@@ -51,8 +52,8 @@ class _TransactionPageState extends State<TransactionPage> {
     setState(() => isLoading = true);
 
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('token') ?? '';
+      final secureStorage = const FlutterSecureStorage();
+      final token = await secureStorage.read(key: 'token') ?? '';
 
       if (token.isEmpty) {
         throw Exception('No token found. Please log in first.');
@@ -75,7 +76,6 @@ class _TransactionPageState extends State<TransactionPage> {
 
       print("STATUS: ${response.statusCode}");
       print("BODY: ${response.body}");
-      print("TOKEN: $token");
 
       final data = response.body.isNotEmpty ? jsonDecode(response.body) : {};
 
@@ -98,6 +98,7 @@ class _TransactionPageState extends State<TransactionPage> {
       }
     } catch (e) {
       print("ERROR: $e");
+
       if (mounted) {
         ScaffoldMessenger.of(
           context,
