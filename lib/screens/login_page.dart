@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:local_auth/local_auth.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+
 import 'qr_scanner_page.dart';
 import 'register_page.dart';
 
@@ -19,6 +21,9 @@ class _LoginPageState extends State<LoginPage> {
   final passwordController = TextEditingController();
   final LocalAuthentication auth = LocalAuthentication();
 
+  // Secure storage
+  final FlutterSecureStorage secureStorage = const FlutterSecureStorage();
+
   bool obscurePassword = true;
   bool loading = false;
 
@@ -32,9 +37,8 @@ class _LoginPageState extends State<LoginPage> {
     final prefs = await SharedPreferences.getInstance();
     bool biometricEnabled = prefs.getBool("biometricEnabled") ?? false;
     bool loggedIn = prefs.getBool("loggedIn") ?? false;
-    String? lastUser = prefs.getString('lastUser');
 
-    if (biometricEnabled && loggedIn && lastUser != null) {
+    if (biometricEnabled && loggedIn) {
       await _biometricLogin();
     }
   }
@@ -54,37 +58,40 @@ class _LoginPageState extends State<LoginPage> {
         }),
       );
 
-      //setState(() => loading = false);
-
       print("Response Status: ${response.statusCode}");
       print("Response Body: ${response.body}");
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
-        print('LOGIN RESPONSE: $data'); // Debug
 
         final token = data['access_token'] ?? data['token'];
         if (token == null || token.isEmpty) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text("Login succeeded but no token returned"),
-            ),
-          );
-          return;
+          throw Exception("No token returned from backend");
         }
 
         final prefs = await SharedPreferences.getInstance();
+
+        // Store non-sensitive flags
         await prefs.setBool('loggedIn', true);
-        await prefs.setString('lastUser', emailController.text.trim());
-        await prefs.setString('token', token);
-        print('Token saved: $token');
+
+        // Store sensitive data securely
+        await secureStorage.write(key: 'token', value: token);
+        await secureStorage.write(
+          key: 'email',
+          value: emailController.text.trim(),
+        );
+        await secureStorage.write(
+          key: 'password',
+          value: passwordController.text.trim(),
+        );
 
         await _askEnableBiometric();
 
         if (!mounted) return;
+
         Navigator.pushReplacement(
           context,
-          MaterialPageRoute(builder: (context) => const QRScannerPage()),
+          MaterialPageRoute(builder: (_) => const QRScannerPage()),
         );
       } else {
         final error = jsonDecode(response.body);
@@ -93,10 +100,11 @@ class _LoginPageState extends State<LoginPage> {
         );
       }
     } catch (e) {
-      setState(() => loading = false);
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text("Unexpected error: $e")));
+    } finally {
+      if (mounted) setState(() => loading = false);
     }
   }
 
@@ -127,7 +135,9 @@ class _LoginPageState extends State<LoginPage> {
         ) ??
         false;
 
-    if (enable) await prefs.setBool("biometricEnabled", true);
+    if (enable) {
+      await prefs.setBool("biometricEnabled", true);
+    }
   }
 
   Future<void> _biometricLogin() async {
@@ -141,30 +151,63 @@ class _LoginPageState extends State<LoginPage> {
 
       if (!mounted) return;
 
-      if (authenticated) {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (context) => const QRScannerPage()),
-        );
-      } else {
+      if (!authenticated) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text("Biometric authentication failed")),
         );
+        return;
+      }
+
+      final email = await secureStorage.read(key: 'email');
+      final password = await secureStorage.read(key: 'password');
+
+      if (email == null || password == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("No saved credentials found")),
+        );
+        return;
+      }
+
+      setState(() => loading = true);
+
+      final response = await http.post(
+        Uri.parse('https://fyp-bank-backend.onrender.com/api/auth/login'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({"email": email, "password": password}),
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        final token = data['access_token'] ?? data['token'];
+
+        await secureStorage.write(key: 'token', value: token);
+
+        if (!mounted) return;
+
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (_) => const QRScannerPage()),
+        );
+      } else {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text("Biometric login failed")));
       }
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Biometric authentication not available")),
+        const SnackBar(content: Text("Biometric authentication error")),
       );
+    } finally {
+      if (mounted) setState(() => loading = false);
     }
   }
 
   Future<void> _handleBiometricLogin() async {
     final prefs = await SharedPreferences.getInstance();
     bool biometricEnabled = prefs.getBool("biometricEnabled") ?? false;
-    String? lastUser = prefs.getString('lastUser');
 
-    if (!biometricEnabled || lastUser == null) {
+    if (!biometricEnabled) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text(
@@ -212,6 +255,7 @@ class _LoginPageState extends State<LoginPage> {
                         ),
                       ),
                       const SizedBox(height: 30),
+
                       TextFormField(
                         controller: emailController,
                         decoration: const InputDecoration(
@@ -223,7 +267,9 @@ class _LoginPageState extends State<LoginPage> {
                             ? "Enter your email"
                             : null,
                       ),
+
                       const SizedBox(height: 20),
+
                       TextFormField(
                         controller: passwordController,
                         obscureText: obscurePassword,
@@ -248,7 +294,9 @@ class _LoginPageState extends State<LoginPage> {
                             ? "Enter your password"
                             : null,
                       ),
+
                       const SizedBox(height: 30),
+
                       SizedBox(
                         width: double.infinity,
                         child: ElevatedButton(
@@ -263,22 +311,26 @@ class _LoginPageState extends State<LoginPage> {
                               : const Text("Login"),
                         ),
                       ),
+
                       const SizedBox(height: 15),
+
                       ElevatedButton.icon(
                         icon: const Icon(Icons.fingerprint),
                         label: const Text("Login with Biometrics"),
                         style: ElevatedButton.styleFrom(
                           padding: const EdgeInsets.all(16),
                         ),
-                        onPressed: _handleBiometricLogin,
+                        onPressed: loading ? null : _handleBiometricLogin,
                       ),
+
                       const SizedBox(height: 15),
+
                       TextButton(
                         onPressed: () {
                           Navigator.push(
                             context,
                             MaterialPageRoute(
-                              builder: (context) => const RegisterPage(),
+                              builder: (_) => const RegisterPage(),
                             ),
                           );
                         },
