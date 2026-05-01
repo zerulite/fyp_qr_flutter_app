@@ -68,6 +68,11 @@ Map<String, dynamic> buildDecisionRequestBody({
     "qrSessionId": transaction["qr_session_id"],
     if (transaction["sender_account_id"] != null)
       "sender_account_id": transaction["sender_account_id"],
+    if (transaction["amount"] != null) "amount": transaction["amount"],
+    if (transaction["merchant_reference"] != null)
+      "merchant_reference": transaction["merchant_reference"],
+    if (transaction["created_at"] != null)
+      "created_at": transaction["created_at"],
     if (transaction["application_id"] != null)
       "application_id": transaction["application_id"],
     if (transaction["application_id"] != null)
@@ -76,6 +81,29 @@ Map<String, dynamic> buildDecisionRequestBody({
     "signature": signature,
     "hash": hash,
   };
+}
+
+String buildIntegrityPlaintext(Map<String, dynamic> transaction) {
+  const requiredFields = [
+    "id",
+    "qr_session_id",
+    "sender_account_id",
+    "amount",
+    "merchant_reference",
+    "created_at",
+  ];
+
+  final missingFields = requiredFields
+      .where((field) => transaction[field] == null)
+      .toList();
+
+  if (missingFields.isNotEmpty) {
+    throw Exception("Missing transaction fields: ${missingFields.join(', ')}");
+  }
+
+  return jsonEncode({
+    for (final field in requiredFields) field: transaction[field],
+  });
 }
 
 Map<String, dynamic> buildDisplayTransactionData(Map<String, dynamic> data) {
@@ -117,8 +145,12 @@ class _TransactionPageState extends State<TransactionPage> {
   }
 
   bool get _hasRequiredTransactionFields =>
-      transaction["transaction_id"] != null &&
-      transaction["qr_session_id"] != null;
+      transaction["id"] != null &&
+      transaction["qr_session_id"] != null &&
+      transaction["sender_account_id"] != null &&
+      transaction["amount"] != null &&
+      transaction["merchant_reference"] != null &&
+      transaction["created_at"] != null;
 
   String _formatFieldLabel(String key) {
     final words = key
@@ -342,12 +374,14 @@ class _TransactionPageState extends State<TransactionPage> {
         );
         if (privateKey == null) return;
 
-        // sign content: transaction_id + decision
-        String signContent = "${transaction["transaction_id"]}|$action";
+        final integrityPlaintext = buildIntegrityPlaintext(transaction);
 
         // generate hash and signature
-        final signature = CryptoService.signData(privateKey, signContent);
-        final hashDigest = CryptoService.getHash(signContent);
+        final signature = CryptoService.signData(
+          privateKey,
+          integrityPlaintext,
+        );
+        final hashDigest = CryptoService.getHashHex(integrityPlaintext);
 
         // send decision, sign, hash back to server
         await _sendDecision(

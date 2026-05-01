@@ -240,10 +240,10 @@ class CryptoService {
   }
 
   // hash for verify integrity
-  static String getHash(String plaintext) {
+  static String getHashHex(String plaintext) {
     final hash = SHA256Digest().process(
       Uint8List.fromList(utf8.encode(plaintext)),
     );
-    return base64Encode(hash);
+    return hash.map((byte) => byte.toRadixString(16).padLeft(2, '0')).join();
   }
 }
