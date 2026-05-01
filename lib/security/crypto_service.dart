@@ -227,20 +227,16 @@ class CryptoService {
 
   /// RSA sign on hash
   static String signData(RSAPrivateKey privateKey, String plaintext) {
-    final pssSigner = PSSSigner(
-      RSAEngine(),          
-      SHA256Digest(),      
-      SHA256Digest()               
-    );
-
-    pssSigner.init(true, PrivateKeyParameter<RSAPrivateKey>(privateKey));
-
-    final sig = pssSigner.generateSignature(
-      Uint8List.fromList(utf8.encode(plaintext)),
-    );
-
-    return base64Encode(sig.bytes);
-  }
+  final signer = RSASigner(
+    SHA256Digest(),
+    '0609608648016503040201', 
+  );
+  signer.init(true, PrivateKeyParameter<RSAPrivateKey>(privateKey));
+  final sig = signer.generateSignature(
+    Uint8List.fromList(utf8.encode(plaintext)),
+  );
+  return base64Encode(sig.bytes);
+}
 
   // hash for verify integrity
   static String getHashHex(String plaintext) {
