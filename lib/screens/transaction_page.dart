@@ -6,6 +6,78 @@ import 'package:local_auth/local_auth.dart';
 import 'approval_page.dart';
 import '../security/crypto_service.dart';
 
+Map<String, dynamic> normalizeTransactionData(Map<String, dynamic> data) {
+  final transactionId =
+      data["transaction_id"] ??
+      data["transactionId"] ??
+      data["transactionID"] ??
+      data["id"];
+  final qrSessionId =
+      data["qr_session_id"] ??
+      data["qrSessionId"] ??
+      data["qrSessionID"] ??
+      data["session_id"] ??
+      data["sessionId"];
+  final applicationId =
+      data["application_id"] ??
+      data["applicationId"] ??
+      data["app_id"] ??
+      data["appId"];
+  final merchantReference =
+      data["merchant_reference"] ??
+      data["merchantReference"] ??
+      data["merchant_name"] ??
+      data["merchantName"] ??
+      data["merchant"] ??
+      data["merchant_id"] ??
+      data["merchantId"] ??
+      data["application_name"] ??
+      data["applicationName"] ??
+      data["app_name"] ??
+      data["appName"];
+
+  return {
+    ...data,
+    "id": transactionId,
+    "transaction_id": transactionId,
+    "transactionId": transactionId,
+    "qr_session_id": qrSessionId,
+    "qrSessionId": qrSessionId,
+    "application_id": applicationId,
+    "applicationId": applicationId,
+    "merchant_reference": merchantReference,
+    "currency":
+        data["currency"] ?? data["currency_code"] ?? data["currencyCode"],
+    "amount": data["amount"] ?? data["total_amount"] ?? data["totalAmount"],
+    "sender_account_id": data["sender_account_id"] ?? data["senderAccountId"],
+    "created_at": data["created_at"] ?? data["createdAt"],
+  };
+}
+
+Map<String, dynamic> buildDecisionRequestBody({
+  required Map<String, dynamic> transaction,
+  required String action,
+  required String signature,
+  required String hash,
+}) {
+  return {
+    "id": transaction["id"] ?? transaction["transaction_id"],
+    "transaction_id": transaction["transaction_id"],
+    "transactionId": transaction["transaction_id"],
+    "qr_session_id": transaction["qr_session_id"],
+    "qrSessionId": transaction["qr_session_id"],
+    if (transaction["sender_account_id"] != null)
+      "sender_account_id": transaction["sender_account_id"],
+    if (transaction["application_id"] != null)
+      "application_id": transaction["application_id"],
+    if (transaction["application_id"] != null)
+      "applicationId": transaction["application_id"],
+    "action": action,
+    "signature": signature,
+    "hash": hash,
+  };
+}
+
 class TransactionPage extends StatefulWidget {
   final String qrData;
 
@@ -18,6 +90,7 @@ class TransactionPage extends StatefulWidget {
 class _TransactionPageState extends State<TransactionPage> {
   final LocalAuthentication auth = LocalAuthentication();
   Map<String, dynamic> transaction = {};
+  Map<String, dynamic> displayTransaction = {};
   bool isLoading = false;
   String? parseError;
 
@@ -27,30 +100,27 @@ class _TransactionPageState extends State<TransactionPage> {
     _parseQRData();
   }
 
-  Map<String, dynamic> _normalizeTransaction(Map<String, dynamic> data) {
-    return {
-      ...data,
-      "transaction_id":
-          data["transaction_id"] ?? data["transactionId"] ?? data["id"],
-      "qr_session_id":
-          data["qr_session_id"] ?? data["qrSessionId"] ?? data["session_id"],
-      "merchant_reference":
-          data["merchant_reference"] ??
-          data["merchantReference"] ??
-          data["merchant"] ??
-          data["merchant_name"],
-      "currency": data["currency"],
-      "amount": data["amount"],
-    };
-  }
-
   bool get _hasRequiredTransactionFields =>
       transaction["transaction_id"] != null &&
       transaction["qr_session_id"] != null;
 
+  String _formatFieldLabel(String key) {
+    final words = key
+        .replaceAllMapped(
+          RegExp(r'([a-z0-9])([A-Z])'),
+          (match) => '${match.group(1)} ${match.group(2)}',
+        )
+        .replaceAll('_', ' ')
+        .split(' ')
+        .where((word) => word.isNotEmpty)
+        .map((word) => word[0].toUpperCase() + word.substring(1));
+    return words.join(' ');
+  }
+
   /// Parse QR code: tries encrypted JSON first, plain JSON second, else key/value pairs.
   void _parseQRData() async {
     final parsedTransaction = <String, dynamic>{};
+    final rawDisplayTransaction = <String, dynamic>{};
     String? errorMessage;
 
     try {
@@ -100,9 +170,13 @@ class _TransactionPageState extends State<TransactionPage> {
         if (decryptedTransaction is! Map<String, dynamic>) {
           throw Exception("Invalid decrypted transaction");
         }
-        parsedTransaction.addAll(_normalizeTransaction(decryptedTransaction));
+        rawDisplayTransaction.addAll(decryptedTransaction);
+        parsedTransaction.addAll(
+          normalizeTransactionData(decryptedTransaction),
+        );
       } else {
-        parsedTransaction.addAll(_normalizeTransaction(decodedQR));
+        rawDisplayTransaction.addAll(decodedQR);
+        parsedTransaction.addAll(normalizeTransactionData(decodedQR));
       }
 
       print("PARSED JSON TRANSACTION: $parsedTransaction");
@@ -114,9 +188,10 @@ class _TransactionPageState extends State<TransactionPage> {
           final key = kv[0].trim();
           final value = kv.sublist(1).join(":").trim();
           parsedTransaction[key] = value;
+          rawDisplayTransaction[key] = value;
         }
       }
-      parsedTransaction.addAll(_normalizeTransaction(parsedTransaction));
+      parsedTransaction.addAll(normalizeTransactionData(parsedTransaction));
       print("PARSED TEXT TRANSACTION: $parsedTransaction");
     } catch (e) {
       errorMessage = e.toString();
@@ -126,10 +201,12 @@ class _TransactionPageState extends State<TransactionPage> {
     if (mounted) {
       setState(() {
         transaction = parsedTransaction;
+        displayTransaction = rawDisplayTransaction;
         parseError = errorMessage;
       });
     } else {
       transaction = parsedTransaction;
+      displayTransaction = rawDisplayTransaction;
       parseError = errorMessage;
     }
     print("PARSED TRANSACTION: $transaction");
@@ -151,13 +228,12 @@ class _TransactionPageState extends State<TransactionPage> {
         throw Exception('No token found. Please log in first.');
       }
 
-      final Map<String, dynamic> requestBody = {
-        "transaction_id": transaction["transaction_id"],
-        "qr_session_id": transaction["qr_session_id"],
-        "action": action,
-        "signature": signature,
-        "hash": hash,
-      };
+      final requestBody = buildDecisionRequestBody(
+        transaction: transaction,
+        action: action,
+        signature: signature,
+        hash: hash,
+      );
 
       print("DECISION REQUEST: ${jsonEncode(requestBody)}");
 
@@ -279,32 +355,45 @@ class _TransactionPageState extends State<TransactionPage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    Text(
-                      transaction["merchant_reference"] ?? "Unknown Merchant",
-                      style: const TextStyle(
+                    const Text(
+                      "Transaction Details",
+                      style: TextStyle(
                         fontSize: 22,
                         fontWeight: FontWeight.bold,
                       ),
                     ),
-                    const SizedBox(height: 10),
-                    Text(
-                      "${transaction["currency"] ?? ""} ${transaction["amount"] ?? ""}",
-                      style: const TextStyle(
-                        fontSize: 32,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.green,
+                    const SizedBox(height: 16),
+                    if (displayTransaction.isEmpty && parseError == null)
+                      const Text(
+                        "Loading transaction details...",
+                        style: TextStyle(color: Colors.grey),
+                      )
+                    else
+                      ...displayTransaction.entries.map(
+                        (entry) => Padding(
+                          padding: const EdgeInsets.only(bottom: 12),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                _formatFieldLabel(entry.key),
+                                style: const TextStyle(
+                                  color: Colors.grey,
+                                  fontSize: 13,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                entry.value?.toString() ?? "",
+                                style: const TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 10),
-                    Text(
-                      "Transaction ID: ${transaction["transaction_id"] ?? ""}",
-                      style: const TextStyle(color: Colors.grey),
-                    ),
-                    const SizedBox(height: 10),
-                    Text(
-                      "QR Session ID: ${transaction["qr_session_id"] ?? ""}",
-                      style: const TextStyle(color: Colors.grey),
-                    ),
                     if (parseError != null) ...[
                       const SizedBox(height: 10),
                       Text(
