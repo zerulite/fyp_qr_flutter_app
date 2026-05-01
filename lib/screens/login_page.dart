@@ -5,8 +5,6 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:local_auth/local_auth.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
-
-import 'qr_scanner_page.dart';
 import 'register_page.dart';
 
 class LoginPage extends StatefulWidget {
@@ -92,7 +90,7 @@ class _LoginPageState extends State<LoginPage> {
 
         Navigator.pushReplacement(
           context,
-          MaterialPageRoute(builder: (_) => const QRScannerPage()),
+          MaterialPageRoute(builder: (_) => const MainPage()),
         );
       } else {
         final error = jsonDecode(response.body);

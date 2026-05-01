@@ -32,13 +32,16 @@ class _TransactionHistoryPageState extends State<TransactionHistoryPage> {
 
     try {
       final token = await secureStorage.read(key: 'token');
+      print(token);
 
       if (token == null || token.isEmpty) {
         throw Exception("No token found");
       }
 
       final response = await http.get(
-        Uri.parse("https://fyp-bank-backend.onrender.com/api/transactions"),
+        Uri.parse(
+          "https://fyp-bank-backend.onrender.com/api/account/transactions",
+        ),
         headers: {
           "Content-Type": "application/json",
           "Authorization": "Bearer $token",
