@@ -59,6 +59,11 @@ class _RegisterPageState extends State<RegisterPage> {
       setState(() => loading = false);
 
       if (response.statusCode == 200 || response.statusCode == 201) {
+        final responseBody = jsonDecode(response.body);
+        print(
+          "######################################## HIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIII ########################################\n\n\n\n\n\n\n\n\n\n",
+        );
+        print(responseBody);
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text("Registration successful! Please login."),
