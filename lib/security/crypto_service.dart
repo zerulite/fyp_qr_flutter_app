@@ -227,15 +227,18 @@ class CryptoService {
 
   /// RSA sign on hash
   static String signData(RSAPrivateKey privateKey, String plaintext) {
-    final signer = RSASigner(
-      SHA256Digest(),
-      '0609608648016503040201',
-    ); // SHA-256 OID
-    signer.init(true, PrivateKeyParameter<RSAPrivateKey>(privateKey));
+    final pssSigner = PSSSigner(
+      RSAEngine(),          
+      SHA256Digest(),      
+      SHA256Digest()               
+    );
 
-    final sig = signer.generateSignature(
+    pssSigner.init(true, PrivateKeyParameter<RSAPrivateKey>(privateKey));
+
+    final sig = pssSigner.generateSignature(
       Uint8List.fromList(utf8.encode(plaintext)),
     );
+
     return base64Encode(sig.bytes);
   }
 
