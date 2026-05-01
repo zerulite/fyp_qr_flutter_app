@@ -164,9 +164,24 @@ class CryptoService {
     RSAPrivateKey privateKey,
     Uint8List encryptedKey,
   ) {
-    final engine = PKCS1Encoding(RSAEngine())
-      ..init(false, PrivateKeyParameter<RSAPrivateKey>(privateKey));
-    return engine.process(encryptedKey);
+    final rsaParams = PrivateKeyParameter<RSAPrivateKey>(privateKey);
+    final decryptors = [
+      PKCS1Encoding(RSAEngine()),
+      OAEPEncoding.withSHA1(RSAEngine()),
+      OAEPEncoding.withSHA256(RSAEngine()),
+    ];
+
+    Object? lastError;
+    for (final decryptor in decryptors) {
+      try {
+        decryptor.init(false, rsaParams);
+        return decryptor.process(encryptedKey);
+      } catch (e) {
+        lastError = e;
+      }
+    }
+
+    throw Exception('Unable to decrypt AES key with RSA: $lastError');
   }
 
   static String decryptPayloadWithAES(
@@ -185,6 +200,28 @@ class CryptoService {
       );
 
     final decrypted = cipher.process(ciphertext);
+    return utf8.decode(decrypted);
+  }
+
+  static String decryptPayloadWithAESGCM(
+    Uint8List aesKey,
+    Uint8List nonce,
+    Uint8List ciphertext,
+    Uint8List authTag,
+  ) {
+    final cipher = GCMBlockCipher(AESEngine())
+      ..init(
+        false,
+        AEADParameters(
+          KeyParameter(aesKey),
+          authTag.length * 8,
+          nonce,
+          Uint8List(0),
+        ),
+      );
+
+    final encryptedPayload = Uint8List.fromList([...ciphertext, ...authTag]);
+    final decrypted = cipher.process(encryptedPayload);
     return utf8.decode(decrypted);
   }
 

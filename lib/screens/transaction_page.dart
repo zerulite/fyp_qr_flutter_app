@@ -159,6 +159,8 @@ class _TransactionPageState extends State<TransactionPage> {
           decodedQR["cipher"] ??
           decodedQR["ciphertext"] ??
           decodedQR["cipherText"];
+      final authTagValue =
+          decodedQR["auth_tag"] ?? decodedQR["authTag"] ?? decodedQR["tag"];
 
       final hasEncryptedPayload =
           encryptedKeyValue != null &&
@@ -167,9 +169,9 @@ class _TransactionPageState extends State<TransactionPage> {
 
       if (hasEncryptedPayload) {
         // decode base64 (require update from qr_session)
-        final encAESKey = base64Decode(encryptedKeyValue);
-        final iv = base64Decode(ivValue);
-        final ciphertext = base64Decode(ciphertextValue);
+        final encAESKey = base64Decode(encryptedKeyValue.toString());
+        final iv = base64Decode(ivValue.toString());
+        final ciphertext = base64Decode(ciphertextValue.toString());
 
         // access private key
         final prefs = await SharedPreferences.getInstance();
@@ -188,11 +190,14 @@ class _TransactionPageState extends State<TransactionPage> {
         );
 
         // decrypt ciphertext with AES key => get transaction plain text
-        final plaintext = CryptoService.decryptPayloadWithAES(
-          rawAESKey,
-          iv,
-          ciphertext,
-        );
+        final plaintext = authTagValue == null
+            ? CryptoService.decryptPayloadWithAES(rawAESKey, iv, ciphertext)
+            : CryptoService.decryptPayloadWithAESGCM(
+                rawAESKey,
+                iv,
+                ciphertext,
+                base64Decode(authTagValue.toString()),
+              );
         print("DECRYPTED QR PLAINTEXT: $plaintext");
 
         final decryptedTransaction = jsonDecode(plaintext);
