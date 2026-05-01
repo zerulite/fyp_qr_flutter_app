@@ -34,9 +34,14 @@ class _RegisterPageState extends State<RegisterPage> {
     setState(() => loading = true);
 
     try {
+      final accountId = emailController.text.trim();
+
       // ---------- crypto start ----------
       final keyPair = CryptoService.generateRSAKeyPair();
-      await CryptoService.savePrivateKey(keyPair.privateKey);
+      await CryptoService.savePrivateKey(
+        keyPair.privateKey,
+        accountId: accountId,
+      );
       final pubKeyStr = CryptoService.formatPublicKey(keyPair.publicKey);
       // ----------- crypto end -----------
 
@@ -44,7 +49,7 @@ class _RegisterPageState extends State<RegisterPage> {
         Uri.parse('https://fyp-bank-backend.onrender.com/api/auth/register'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
-          'email': emailController.text.trim(),
+          'email': accountId,
           'password': passwordController.text.trim(),
           'phone_number': phoneController.text.trim(),
           'public_key': pubKeyStr, // add in public key for send back package

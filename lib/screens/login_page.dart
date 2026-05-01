@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:local_auth/local_auth.dart';
 import 'qr_scanner_page.dart';
 import 'register_page.dart';
+import '../security/crypto_service.dart';
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -45,11 +46,13 @@ class _LoginPageState extends State<LoginPage> {
     setState(() => loading = true);
 
     try {
+      final accountId = emailController.text.trim();
+
       final response = await http.post(
         Uri.parse('https://fyp-bank-backend.onrender.com/api/auth/login'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
-          "email": emailController.text.trim(),
+          "email": accountId,
           "password": passwordController.text.trim(),
         }),
       );
@@ -75,9 +78,12 @@ class _LoginPageState extends State<LoginPage> {
 
         final prefs = await SharedPreferences.getInstance();
         await prefs.setBool('loggedIn', true);
-        await prefs.setString('lastUser', emailController.text.trim());
+        await prefs.setString('lastUser', accountId);
         await prefs.setString('token', token);
         print('Token saved: $token');
+
+        await CryptoService.uploadPublicKey(token, accountId: accountId);
+        print('Public key uploaded');
 
         await _askEnableBiometric();
 

@@ -28,18 +28,24 @@ class _TransactionPageState extends State<TransactionPage> {
 
   /// Parse QR code: tries JSON first, else parses key: value pairs
   void _parseQRData() async {
-    transaction = {};
+    final parsedTransaction = <String, dynamic>{};
     try {
-      transaction = jsonDecode(widget.qrData);
+      final encryptedTransaction = jsonDecode(widget.qrData);
 
       // decode base64 (require update from qr_session)
-      final encAESKey = base64Decode(transaction["encAES"]);
-      final iv = base64Decode(transaction["initial_vector"]);
-      final ciphertext = base64Decode(transaction["cipher"]);
+      final encAESKey = base64Decode(encryptedTransaction["encAES"]);
+      final iv = base64Decode(encryptedTransaction["initial_vector"]);
+      final ciphertext = base64Decode(encryptedTransaction["cipher"]);
 
       // ! Add biometric before this (access private key)
       // access private key
-      final privateKey = await CryptoService.getPrivateKey();
+      final prefs = await SharedPreferences.getInstance();
+      final accountId = prefs.getString('lastUser');
+      if (accountId == null) throw Exception("No logged in user");
+
+      final privateKey = await CryptoService.getPrivateKey(
+        accountId: accountId,
+      );
       if (privateKey == null) throw Exception("Lost Private key");
 
       // decrypt AES key with RSA private
@@ -54,6 +60,11 @@ class _TransactionPageState extends State<TransactionPage> {
         iv,
         ciphertext,
       );
+      final decryptedTransaction = jsonDecode(plaintext);
+      if (decryptedTransaction is! Map<String, dynamic>) {
+        throw Exception("Invalid decrypted transaction");
+      }
+      parsedTransaction.addAll(decryptedTransaction);
       print(plaintext);
     } catch (e) {
       final pairs = widget.qrData.split(",");
@@ -62,9 +73,14 @@ class _TransactionPageState extends State<TransactionPage> {
         if (kv.length >= 2) {
           final key = kv[0].trim();
           final value = kv.sublist(1).join(":").trim();
-          transaction[key] = value;
+          parsedTransaction[key] = value;
         }
       }
+    }
+    if (mounted) {
+      setState(() => transaction = parsedTransaction);
+    } else {
+      transaction = parsedTransaction;
     }
     print("PARSED TRANSACTION: $transaction");
   }
@@ -147,7 +163,13 @@ class _TransactionPageState extends State<TransactionPage> {
 
       if (authenticated) {
         // access private key
-        final privateKey = await CryptoService.getPrivateKey();
+        final prefs = await SharedPreferences.getInstance();
+        final accountId = prefs.getString('lastUser');
+        if (accountId == null) return;
+
+        final privateKey = await CryptoService.getPrivateKey(
+          accountId: accountId,
+        );
         if (privateKey == null) return;
 
         // sign content: transaction_id + decision
