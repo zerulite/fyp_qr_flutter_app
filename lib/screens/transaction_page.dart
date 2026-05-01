@@ -277,7 +277,7 @@ class _TransactionPageState extends State<TransactionPage> {
 
       final response = await http.post(
         Uri.parse(
-          "https://nurturing-renewal-production.up.railway.app/api/payments/decision/",
+          "https://fyp-bank-backend.onrender.com/api/payments/decision/",
         ),
         headers: {
           "Content-Type": "application/json",
