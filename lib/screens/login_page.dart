@@ -82,8 +82,7 @@ class _LoginPageState extends State<LoginPage> {
         await prefs.setString('token', token);
         print('Token saved: $token');
 
-        await CryptoService.uploadPublicKey(token, accountId: accountId);
-        print('Public key uploaded');
+        await CryptoService.ensurePrivateKeyExists(accountId: accountId);
 
         await _askEnableBiometric();
 

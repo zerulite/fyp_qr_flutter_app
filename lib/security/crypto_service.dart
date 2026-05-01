@@ -4,7 +4,6 @@ import 'dart:typed_data';
 import 'package:pointycastle/export.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:pointycastle/asn1.dart';
-import 'package:http/http.dart' as http;
 
 class CryptoService {
   static const _storage = FlutterSecureStorage();
@@ -14,6 +13,8 @@ class CryptoService {
 
   static String _storageKey(String accountId, String keyPart) =>
       'rsa_${_normalizeAccountId(accountId)}_$keyPart';
+
+  static String _legacyStorageKey(String keyPart) => 'rsa_$keyPart';
 
   // generate RSA key pair
   static AsymmetricKeyPair<RSAPublicKey, RSAPrivateKey> generateRSAKeyPair() {
@@ -99,21 +100,41 @@ class CryptoService {
     required String accountId,
   }) async {
     try {
-      final n = await _storage.read(key: _storageKey(accountId, 'n'));
-      final d = await _storage.read(key: _storageKey(accountId, 'd'));
-      final p = await _storage.read(key: _storageKey(accountId, 'p'));
-      final q = await _storage.read(key: _storageKey(accountId, 'q'));
+      var n = await _storage.read(key: _storageKey(accountId, 'n'));
+      var d = await _storage.read(key: _storageKey(accountId, 'd'));
+      var p = await _storage.read(key: _storageKey(accountId, 'p'));
+      var q = await _storage.read(key: _storageKey(accountId, 'q'));
+
+      if (n == null || d == null || p == null || q == null) {
+        n = await _storage.read(key: _legacyStorageKey('n'));
+        d = await _storage.read(key: _legacyStorageKey('d'));
+        p = await _storage.read(key: _legacyStorageKey('p'));
+        q = await _storage.read(key: _legacyStorageKey('q'));
+      }
 
       if (n == null || d == null || p == null || q == null) return null;
 
-      return RSAPrivateKey(
+      final privateKey = RSAPrivateKey(
         BigInt.parse(n),
         BigInt.parse(d),
         BigInt.parse(p),
         BigInt.parse(q),
       );
+      await savePrivateKey(privateKey, accountId: accountId);
+      return privateKey;
     } catch (e) {
       return null;
+    }
+  }
+
+  static Future<void> ensurePrivateKeyExists({
+    required String accountId,
+  }) async {
+    final privateKey = await getPrivateKey(accountId: accountId);
+    if (privateKey == null) {
+      throw Exception(
+        'Private key not found on this device. Please register this account on this device again.',
+      );
     }
   }
 
@@ -121,37 +142,20 @@ class CryptoService {
     String token, {
     required String accountId,
   }) async {
-    RSAPublicKey publicKey;
     final privateKey = await getPrivateKey(accountId: accountId);
 
     if (privateKey == null) {
-      final keyPair = generateRSAKeyPair();
-      await savePrivateKey(keyPair.privateKey, accountId: accountId);
-      publicKey = keyPair.publicKey;
-    } else {
-      final modulus = privateKey.modulus;
-      if (modulus == null) {
-        throw Exception('Stored private key is invalid');
-      }
-      publicKey = RSAPublicKey(modulus, BigInt.parse('65537'));
-    }
-
-    final publicKeyPem = formatPublicKey(publicKey);
-
-    final response = await http.put(
-      Uri.parse('https://fyp-bank-backend.onrender.com/api/account/public-key'),
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer $token',
-      },
-      body: jsonEncode({'public_key': publicKeyPem}),
-    );
-
-    if (response.statusCode != 200) {
       throw Exception(
-        'Public key upload failed: ${response.statusCode} ${response.body}',
+        'Private key not found on this device. Please register this account on this device again.',
       );
     }
+
+    final modulus = privateKey.modulus;
+    if (modulus == null) {
+      throw Exception('Stored private key is invalid');
+    }
+    final publicKey = RSAPublicKey(modulus, BigInt.parse('65537'));
+    final publicKeyPem = formatPublicKey(publicKey);
 
     return publicKeyPem;
   }
