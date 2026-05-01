@@ -375,13 +375,10 @@ class _TransactionPageState extends State<TransactionPage> {
         if (privateKey == null) return;
 
         final integrityPlaintext = buildIntegrityPlaintext(transaction);
-
-        // generate hash and signature
-        final signature = CryptoService.signData(
-          privateKey,
-          integrityPlaintext,
-        );
         final hashDigest = CryptoService.getHashHex(integrityPlaintext);
+
+        // Sign the same hash value the server verifies.
+        final signature = CryptoService.signData(privateKey, hashDigest);
 
         // send decision, sign, hash back to server
         await _sendDecision(
