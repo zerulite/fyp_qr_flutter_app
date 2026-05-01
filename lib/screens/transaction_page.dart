@@ -78,6 +78,22 @@ Map<String, dynamic> buildDecisionRequestBody({
   };
 }
 
+Map<String, dynamic> buildDisplayTransactionData(Map<String, dynamic> data) {
+  const visibleKeys = [
+    "id",
+    "qr_session_id",
+    "sender_account_id",
+    "amount",
+    "merchant_reference",
+    "created_at",
+  ];
+
+  return {
+    for (final key in visibleKeys)
+      if (data.containsKey(key)) key: data[key],
+  };
+}
+
 class TransactionPage extends StatefulWidget {
   final String qrData;
 
@@ -131,16 +147,29 @@ class _TransactionPageState extends State<TransactionPage> {
         throw const FormatException("QR JSON is not an object");
       }
 
+      final encryptedKeyValue =
+          decodedQR["encAES"] ??
+          decodedQR["encrypted_key"] ??
+          decodedQR["encryptedKey"];
+      final ivValue =
+          decodedQR["initial_vector"] ??
+          decodedQR["iv"] ??
+          decodedQR["initialVector"];
+      final ciphertextValue =
+          decodedQR["cipher"] ??
+          decodedQR["ciphertext"] ??
+          decodedQR["cipherText"];
+
       final hasEncryptedPayload =
-          decodedQR["encAES"] != null &&
-          decodedQR["initial_vector"] != null &&
-          decodedQR["cipher"] != null;
+          encryptedKeyValue != null &&
+          ivValue != null &&
+          ciphertextValue != null;
 
       if (hasEncryptedPayload) {
         // decode base64 (require update from qr_session)
-        final encAESKey = base64Decode(decodedQR["encAES"]);
-        final iv = base64Decode(decodedQR["initial_vector"]);
-        final ciphertext = base64Decode(decodedQR["cipher"]);
+        final encAESKey = base64Decode(encryptedKeyValue);
+        final iv = base64Decode(ivValue);
+        final ciphertext = base64Decode(ciphertextValue);
 
         // access private key
         final prefs = await SharedPreferences.getInstance();
@@ -170,12 +199,14 @@ class _TransactionPageState extends State<TransactionPage> {
         if (decryptedTransaction is! Map<String, dynamic>) {
           throw Exception("Invalid decrypted transaction");
         }
-        rawDisplayTransaction.addAll(decryptedTransaction);
+        rawDisplayTransaction.addAll(
+          buildDisplayTransactionData(decryptedTransaction),
+        );
         parsedTransaction.addAll(
           normalizeTransactionData(decryptedTransaction),
         );
       } else {
-        rawDisplayTransaction.addAll(decodedQR);
+        rawDisplayTransaction.addAll(buildDisplayTransactionData(decodedQR));
         parsedTransaction.addAll(normalizeTransactionData(decodedQR));
       }
 
@@ -188,7 +219,9 @@ class _TransactionPageState extends State<TransactionPage> {
           final key = kv[0].trim();
           final value = kv.sublist(1).join(":").trim();
           parsedTransaction[key] = value;
-          rawDisplayTransaction[key] = value;
+          if (buildDisplayTransactionData({key: value}).isNotEmpty) {
+            rawDisplayTransaction[key] = value;
+          }
         }
       }
       parsedTransaction.addAll(normalizeTransactionData(parsedTransaction));
@@ -334,119 +367,122 @@ class _TransactionPageState extends State<TransactionPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text("Confirm Payment")),
-      body: Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            const SizedBox(height: 20),
-            const Text(
-              "Payment Confirmation",
-              style: TextStyle(fontSize: 26, fontWeight: FontWeight.bold),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 20),
+      body: SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const SizedBox(height: 20),
+              const Text(
+                "Payment Confirmation",
+                style: TextStyle(fontSize: 26, fontWeight: FontWeight.bold),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 20),
 
-            // Transaction Card
-            Card(
-              elevation: 3,
-              child: Padding(
-                padding: const EdgeInsets.all(20),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    const Text(
-                      "Transaction Details",
-                      style: TextStyle(
-                        fontSize: 22,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    if (displayTransaction.isEmpty && parseError == null)
+              // Transaction Card
+              Card(
+                elevation: 3,
+                child: Padding(
+                  padding: const EdgeInsets.all(20),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
                       const Text(
-                        "Loading transaction details...",
-                        style: TextStyle(color: Colors.grey),
-                      )
-                    else
-                      ...displayTransaction.entries.map(
-                        (entry) => Padding(
-                          padding: const EdgeInsets.only(bottom: 12),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                _formatFieldLabel(entry.key),
-                                style: const TextStyle(
-                                  color: Colors.grey,
-                                  fontSize: 13,
-                                ),
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                entry.value?.toString() ?? "",
-                                style: const TextStyle(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ],
-                          ),
+                        "Transaction Details",
+                        style: TextStyle(
+                          fontSize: 22,
+                          fontWeight: FontWeight.bold,
                         ),
                       ),
-                    if (parseError != null) ...[
-                      const SizedBox(height: 10),
-                      Text(
-                        "QR Error: $parseError",
-                        style: const TextStyle(color: Colors.red),
-                      ),
+                      const SizedBox(height: 16),
+                      if (displayTransaction.isEmpty && parseError == null)
+                        const Text(
+                          "Loading transaction details...",
+                          style: TextStyle(color: Colors.grey),
+                        )
+                      else
+                        ...displayTransaction.entries.map(
+                          (entry) => Padding(
+                            padding: const EdgeInsets.only(bottom: 12),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  _formatFieldLabel(entry.key),
+                                  style: const TextStyle(
+                                    color: Colors.grey,
+                                    fontSize: 13,
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  entry.value?.toString() ?? "",
+                                  softWrap: true,
+                                  style: const TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      if (parseError != null) ...[
+                        const SizedBox(height: 10),
+                        Text(
+                          "QR Error: $parseError",
+                          style: const TextStyle(color: Colors.red),
+                        ),
+                      ],
                     ],
-                  ],
+                  ),
                 ),
               ),
-            ),
 
-            const Spacer(),
+              const SizedBox(height: 32),
 
-            // Approve Button
-            ElevatedButton.icon(
-              icon: const Icon(Icons.check),
-              label: const Text("Approve Payment"),
-              style: ElevatedButton.styleFrom(
-                padding: const EdgeInsets.all(16),
+              // Approve Button
+              ElevatedButton.icon(
+                icon: const Icon(Icons.check),
+                label: const Text("Approve Payment"),
+                style: ElevatedButton.styleFrom(
+                  padding: const EdgeInsets.all(16),
+                ),
+                onPressed: isLoading || !_hasRequiredTransactionFields
+                    ? null
+                    : () => _authenticateAndSend(
+                        "APPROVE",
+                        transaction["transaction_id"].toString(),
+                      ),
               ),
-              onPressed: isLoading || !_hasRequiredTransactionFields
-                  ? null
-                  : () => _authenticateAndSend(
-                      "APPROVE",
-                      transaction["transaction_id"].toString(),
-                    ),
-            ),
 
-            const SizedBox(height: 10),
+              const SizedBox(height: 10),
 
-            // Reject Button
-            ElevatedButton.icon(
-              icon: const Icon(Icons.close),
-              label: const Text("Reject Payment"),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.red,
-                padding: const EdgeInsets.all(16),
+              // Reject Button
+              ElevatedButton.icon(
+                icon: const Icon(Icons.close),
+                label: const Text("Reject Payment"),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.red,
+                  padding: const EdgeInsets.all(16),
+                ),
+                onPressed: isLoading || !_hasRequiredTransactionFields
+                    ? null
+                    : () => _authenticateAndSend(
+                        "REJECT",
+                        transaction["transaction_id"].toString(),
+                      ),
               ),
-              onPressed: isLoading || !_hasRequiredTransactionFields
-                  ? null
-                  : () => _authenticateAndSend(
-                      "REJECT",
-                      transaction["transaction_id"].toString(),
-                    ),
-            ),
 
-            if (isLoading)
-              const Padding(
-                padding: EdgeInsets.only(top: 20),
-                child: LinearProgressIndicator(),
-              ),
-          ],
+              if (isLoading)
+                const Padding(
+                  padding: EdgeInsets.only(top: 20),
+                  child: LinearProgressIndicator(),
+                ),
+            ],
+          ),
         ),
       ),
     );
