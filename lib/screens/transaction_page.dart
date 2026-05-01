@@ -17,8 +17,9 @@ class TransactionPage extends StatefulWidget {
 
 class _TransactionPageState extends State<TransactionPage> {
   final LocalAuthentication auth = LocalAuthentication();
-  late Map<String, dynamic> transaction;
+  Map<String, dynamic> transaction = {};
   bool isLoading = false;
+  String? parseError;
 
   @override
   void initState() {
@@ -26,47 +27,86 @@ class _TransactionPageState extends State<TransactionPage> {
     _parseQRData();
   }
 
-  /// Parse QR code: tries JSON first, else parses key: value pairs
+  Map<String, dynamic> _normalizeTransaction(Map<String, dynamic> data) {
+    return {
+      ...data,
+      "transaction_id":
+          data["transaction_id"] ?? data["transactionId"] ?? data["id"],
+      "qr_session_id":
+          data["qr_session_id"] ?? data["qrSessionId"] ?? data["session_id"],
+      "merchant_reference":
+          data["merchant_reference"] ??
+          data["merchantReference"] ??
+          data["merchant"] ??
+          data["merchant_name"],
+      "currency": data["currency"],
+      "amount": data["amount"],
+    };
+  }
+
+  bool get _hasRequiredTransactionFields =>
+      transaction["transaction_id"] != null &&
+      transaction["qr_session_id"] != null;
+
+  /// Parse QR code: tries encrypted JSON first, plain JSON second, else key/value pairs.
   void _parseQRData() async {
     final parsedTransaction = <String, dynamic>{};
+    String? errorMessage;
+
     try {
-      final encryptedTransaction = jsonDecode(widget.qrData);
+      print("RAW QR DATA: ${widget.qrData}");
+      final decodedQR = jsonDecode(widget.qrData);
 
-      // decode base64 (require update from qr_session)
-      final encAESKey = base64Decode(encryptedTransaction["encAES"]);
-      final iv = base64Decode(encryptedTransaction["initial_vector"]);
-      final ciphertext = base64Decode(encryptedTransaction["cipher"]);
-
-      // ! Add biometric before this (access private key)
-      // access private key
-      final prefs = await SharedPreferences.getInstance();
-      final accountId = prefs.getString('lastUser');
-      if (accountId == null) throw Exception("No logged in user");
-
-      final privateKey = await CryptoService.getPrivateKey(
-        accountId: accountId,
-      );
-      if (privateKey == null) throw Exception("Lost Private key");
-
-      // decrypt AES key with RSA private
-      final rawAESKey = CryptoService.decryptAESKeyWithRSA(
-        privateKey,
-        encAESKey,
-      );
-
-      // decrypt ciphertext with AES key => get transaction plain text
-      final plaintext = CryptoService.decryptPayloadWithAES(
-        rawAESKey,
-        iv,
-        ciphertext,
-      );
-      final decryptedTransaction = jsonDecode(plaintext);
-      if (decryptedTransaction is! Map<String, dynamic>) {
-        throw Exception("Invalid decrypted transaction");
+      if (decodedQR is! Map<String, dynamic>) {
+        throw const FormatException("QR JSON is not an object");
       }
-      parsedTransaction.addAll(decryptedTransaction);
-      print(plaintext);
-    } catch (e) {
+
+      final hasEncryptedPayload =
+          decodedQR["encAES"] != null &&
+          decodedQR["initial_vector"] != null &&
+          decodedQR["cipher"] != null;
+
+      if (hasEncryptedPayload) {
+        // decode base64 (require update from qr_session)
+        final encAESKey = base64Decode(decodedQR["encAES"]);
+        final iv = base64Decode(decodedQR["initial_vector"]);
+        final ciphertext = base64Decode(decodedQR["cipher"]);
+
+        // access private key
+        final prefs = await SharedPreferences.getInstance();
+        final accountId = prefs.getString('lastUser');
+        if (accountId == null) throw Exception("No logged in user");
+
+        final privateKey = await CryptoService.getPrivateKey(
+          accountId: accountId,
+        );
+        if (privateKey == null) throw Exception("Lost Private key");
+
+        // decrypt AES key with RSA private
+        final rawAESKey = CryptoService.decryptAESKeyWithRSA(
+          privateKey,
+          encAESKey,
+        );
+
+        // decrypt ciphertext with AES key => get transaction plain text
+        final plaintext = CryptoService.decryptPayloadWithAES(
+          rawAESKey,
+          iv,
+          ciphertext,
+        );
+        print("DECRYPTED QR PLAINTEXT: $plaintext");
+
+        final decryptedTransaction = jsonDecode(plaintext);
+        if (decryptedTransaction is! Map<String, dynamic>) {
+          throw Exception("Invalid decrypted transaction");
+        }
+        parsedTransaction.addAll(_normalizeTransaction(decryptedTransaction));
+      } else {
+        parsedTransaction.addAll(_normalizeTransaction(decodedQR));
+      }
+
+      print("PARSED JSON TRANSACTION: $parsedTransaction");
+    } on FormatException {
       final pairs = widget.qrData.split(",");
       for (var pair in pairs) {
         final kv = pair.split(":");
@@ -76,11 +116,21 @@ class _TransactionPageState extends State<TransactionPage> {
           parsedTransaction[key] = value;
         }
       }
+      parsedTransaction.addAll(_normalizeTransaction(parsedTransaction));
+      print("PARSED TEXT TRANSACTION: $parsedTransaction");
+    } catch (e) {
+      errorMessage = e.toString();
+      print("QR PARSE/DECRYPT ERROR: $e");
     }
+
     if (mounted) {
-      setState(() => transaction = parsedTransaction);
+      setState(() {
+        transaction = parsedTransaction;
+        parseError = errorMessage;
+      });
     } else {
       transaction = parsedTransaction;
+      parseError = errorMessage;
     }
     print("PARSED TRANSACTION: $transaction");
   }
@@ -108,6 +158,8 @@ class _TransactionPageState extends State<TransactionPage> {
         "signature": signature,
         "hash": hash,
       };
+
+      print("DECISION REQUEST: ${jsonEncode(requestBody)}");
 
       final response = await http.post(
         Uri.parse(
@@ -162,6 +214,10 @@ class _TransactionPageState extends State<TransactionPage> {
       if (!mounted) return;
 
       if (authenticated) {
+        if (!_hasRequiredTransactionFields) {
+          throw Exception("Transaction data is incomplete");
+        }
+
         // access private key
         final prefs = await SharedPreferences.getInstance();
         final accountId = prefs.getString('lastUser');
@@ -249,6 +305,13 @@ class _TransactionPageState extends State<TransactionPage> {
                       "QR Session ID: ${transaction["qr_session_id"] ?? ""}",
                       style: const TextStyle(color: Colors.grey),
                     ),
+                    if (parseError != null) ...[
+                      const SizedBox(height: 10),
+                      Text(
+                        "QR Error: $parseError",
+                        style: const TextStyle(color: Colors.red),
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -263,7 +326,7 @@ class _TransactionPageState extends State<TransactionPage> {
               style: ElevatedButton.styleFrom(
                 padding: const EdgeInsets.all(16),
               ),
-              onPressed: isLoading
+              onPressed: isLoading || !_hasRequiredTransactionFields
                   ? null
                   : () => _authenticateAndSend(
                       "APPROVE",
@@ -281,7 +344,7 @@ class _TransactionPageState extends State<TransactionPage> {
                 backgroundColor: Colors.red,
                 padding: const EdgeInsets.all(16),
               ),
-              onPressed: isLoading
+              onPressed: isLoading || !_hasRequiredTransactionFields
                   ? null
                   : () => _authenticateAndSend(
                       "REJECT",
