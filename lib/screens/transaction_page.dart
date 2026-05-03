@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
@@ -204,6 +205,15 @@ class _TransactionPageState extends State<TransactionPage> {
         final encAESKey = base64Decode(encryptedKeyValue.toString());
         final iv = base64Decode(ivValue.toString());
         final ciphertext = base64Decode(ciphertextValue.toString());
+        final authTag = authTagValue == null
+            ? null
+            : base64Decode(authTagValue.toString());
+
+        print(
+          "DECRYPT DEBUG: encrypted_key=${encAESKey.length} bytes, "
+          "iv=${iv.length} bytes, ciphertext=${ciphertext.length} bytes, "
+          "auth_tag=${authTag?.length ?? 0} bytes",
+        );
 
         // access private key
         final prefs = await SharedPreferences.getInstance();
@@ -216,20 +226,31 @@ class _TransactionPageState extends State<TransactionPage> {
         if (privateKey == null) throw Exception("Lost Private key");
 
         // decrypt AES key with RSA private
-        final rawAESKey = CryptoService.decryptAESKeyWithRSA(
-          privateKey,
-          encAESKey,
-        );
+        late final Uint8List rawAESKey;
+        try {
+          rawAESKey = CryptoService.decryptAESKeyWithRSA(privateKey, encAESKey);
+          print(
+            "DECRYPT DEBUG: rsa_oaep_sha256_aes_key=${rawAESKey.length} bytes",
+          );
+        } catch (e) {
+          throw Exception("RSA AES key decrypt failed: $e");
+        }
 
         // decrypt ciphertext with AES key => get transaction plain text
-        final plaintext = authTagValue == null
-            ? CryptoService.decryptPayloadWithAES(rawAESKey, iv, ciphertext)
-            : CryptoService.decryptPayloadWithAESGCM(
-                rawAESKey,
-                iv,
-                ciphertext,
-                base64Decode(authTagValue.toString()),
-              );
+        late final String plaintext;
+        try {
+          plaintext = authTag == null
+              ? CryptoService.decryptPayloadWithAES(rawAESKey, iv, ciphertext)
+              : CryptoService.decryptPayloadWithAESGCM(
+                  rawAESKey,
+                  iv,
+                  ciphertext,
+                  authTag,
+                );
+          print("DECRYPT DEBUG: aes_mode=${authTag == null ? 'CBC' : 'GCM'}");
+        } catch (e) {
+          throw Exception("AES payload decrypt failed: $e");
+        }
         print("DECRYPTED QR PLAINTEXT: $plaintext");
 
         final decryptedTransaction = jsonDecode(plaintext);

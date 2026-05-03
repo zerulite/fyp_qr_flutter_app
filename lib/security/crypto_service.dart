@@ -164,25 +164,22 @@ class CryptoService {
     RSAPrivateKey privateKey,
     Uint8List encryptedKey,
   ) {
-    final rsaParams = PrivateKeyParameter<RSAPrivateKey>(privateKey);
-    final decryptors = [
-      PKCS1Encoding(RSAEngine()),
-      OAEPEncoding.withSHA1(RSAEngine()),
-      OAEPEncoding.withSHA256(RSAEngine()),
-    ];
+    final engine = OAEPEncoding.withSHA256(RSAEngine())
+      ..init(false, PrivateKeyParameter<RSAPrivateKey>(privateKey));
+    final aesKey = engine.process(encryptedKey);
 
-    Object? lastError;
-    for (final decryptor in decryptors) {
-      try {
-        decryptor.init(false, rsaParams);
-        return decryptor.process(encryptedKey);
-      } catch (e) {
-        lastError = e;
-      }
+    if (!_isValidAESKeyLength(aesKey)) {
+      throw Exception(
+        'Invalid AES key length after RSA-OAEP-SHA256 decrypt: '
+        '${aesKey.length} bytes',
+      );
     }
 
-    throw Exception('Unable to decrypt AES key with RSA: $lastError');
+    return aesKey;
   }
+
+  static bool _isValidAESKeyLength(Uint8List key) =>
+      key.length == 16 || key.length == 24 || key.length == 32;
 
   static String decryptPayloadWithAES(
     Uint8List aesKey,
@@ -227,16 +224,13 @@ class CryptoService {
 
   /// RSA sign on hash
   static String signData(RSAPrivateKey privateKey, String plaintext) {
-  final signer = RSASigner(
-    SHA256Digest(),
-    '0609608648016503040201', 
-  );
-  signer.init(true, PrivateKeyParameter<RSAPrivateKey>(privateKey));
-  final sig = signer.generateSignature(
-    Uint8List.fromList(utf8.encode(plaintext)),
-  );
-  return base64Encode(sig.bytes);
-}
+    final signer = RSASigner(SHA256Digest(), '0609608648016503040201');
+    signer.init(true, PrivateKeyParameter<RSAPrivateKey>(privateKey));
+    final sig = signer.generateSignature(
+      Uint8List.fromList(utf8.encode(plaintext)),
+    );
+    return base64Encode(sig.bytes);
+  }
 
   // hash for verify integrity
   static String getHashHex(String plaintext) {
