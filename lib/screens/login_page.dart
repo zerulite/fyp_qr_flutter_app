@@ -59,12 +59,8 @@ class _LoginPageState extends State<LoginPage> {
 
       //setState(() => loading = false);
 
-      print("Response Status: ${response.statusCode}");
-      print("Response Body: ${response.body}");
-
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
-        print('LOGIN RESPONSE: $data'); // Debug
 
         final token = data['access_token'] ?? data['token'];
         if (token == null || token.isEmpty) {
@@ -80,7 +76,6 @@ class _LoginPageState extends State<LoginPage> {
         await prefs.setBool('loggedIn', true);
         await prefs.setString('lastUser', accountId);
         await prefs.setString('token', token);
-        print('Token saved: $token');
 
         await CryptoService.ensurePrivateKeyExists(accountId: accountId);
 
@@ -99,9 +94,13 @@ class _LoginPageState extends State<LoginPage> {
       }
     } catch (e) {
       setState(() => loading = false);
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text("Unexpected error: $e")));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            "Login failed. Please check your details and try again.",
+          ),
+        ),
+      );
     }
   }
 

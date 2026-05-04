@@ -107,6 +107,21 @@ String buildIntegrityPlaintext(Map<String, dynamic> transaction) {
   });
 }
 
+String friendlyDecisionError(int statusCode, Map<String, dynamic> data) {
+  final message = data["message"] ?? data["error"];
+
+  if (statusCode == 401) {
+    return "We could not verify this transaction. Please try again.";
+  }
+  if (statusCode == 404) {
+    return "This transaction is no longer available.";
+  }
+  if (message is String && message.isNotEmpty && statusCode >= 400) {
+    return message;
+  }
+  return "We could not process this transaction. Please try again.";
+}
+
 Map<String, dynamic> buildDisplayTransactionData(Map<String, dynamic> data) {
   const visibleKeys = [
     "id",
@@ -153,17 +168,69 @@ class _TransactionPageState extends State<TransactionPage> {
       transaction["merchant_reference"] != null &&
       transaction["created_at"] != null;
 
-  String _formatFieldLabel(String key) {
-    final words = key
-        .replaceAllMapped(
-          RegExp(r'([a-z0-9])([A-Z])'),
-          (match) => '${match.group(1)} ${match.group(2)}',
-        )
-        .replaceAll('_', ' ')
-        .split(' ')
-        .where((word) => word.isNotEmpty)
-        .map((word) => word[0].toUpperCase() + word.substring(1));
-    return words.join(' ');
+  String _formatAmount() {
+    final amount = transaction["amount"];
+    if (amount == null) return "--";
+
+    final currency = transaction["currency"];
+    final amountText = amount is num
+        ? amount.toStringAsFixed(2)
+        : amount.toString();
+
+    if (currency == null || currency.toString().isEmpty) {
+      return amountText;
+    }
+
+    return "${currency.toString()} $amountText";
+  }
+
+  String _shortId(dynamic value) {
+    final text = value?.toString() ?? "";
+    if (text.length <= 13) return text;
+    return "${text.substring(0, 4)}...${text.substring(text.length - 4)}";
+  }
+
+  String _formatCreatedAt() {
+    final raw = transaction["created_at"]?.toString();
+    if (raw == null || raw.isEmpty) return "--";
+
+    final parsed = DateTime.tryParse(raw);
+    if (parsed == null) return raw;
+
+    final local = parsed.toLocal();
+    final day = local.day.toString().padLeft(2, '0');
+    final month = local.month.toString().padLeft(2, '0');
+    final year = local.year.toString();
+    final hour = local.hour.toString().padLeft(2, '0');
+    final minute = local.minute.toString().padLeft(2, '0');
+    return "$day/$month/$year $hour:$minute";
+  }
+
+  Widget _detailRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            flex: 4,
+            child: Text(
+              label,
+              style: const TextStyle(color: Colors.grey, fontSize: 13),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            flex: 6,
+            child: Text(
+              value,
+              textAlign: TextAlign.right,
+              style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   /// Parse QR code: tries encrypted JSON first, plain JSON second, else key/value pairs.
@@ -173,7 +240,6 @@ class _TransactionPageState extends State<TransactionPage> {
     String? errorMessage;
 
     try {
-      print("RAW QR DATA: ${widget.qrData}");
       final decodedQR = jsonDecode(widget.qrData);
 
       if (decodedQR is! Map<String, dynamic>) {
@@ -209,12 +275,6 @@ class _TransactionPageState extends State<TransactionPage> {
             ? null
             : base64Decode(authTagValue.toString());
 
-        print(
-          "DECRYPT DEBUG: encrypted_key=${encAESKey.length} bytes, "
-          "iv=${iv.length} bytes, ciphertext=${ciphertext.length} bytes, "
-          "auth_tag=${authTag?.length ?? 0} bytes",
-        );
-
         // access private key
         final prefs = await SharedPreferences.getInstance();
         final accountId = prefs.getString('lastUser');
@@ -229,9 +289,6 @@ class _TransactionPageState extends State<TransactionPage> {
         late final Uint8List rawAESKey;
         try {
           rawAESKey = CryptoService.decryptAESKeyWithRSA(privateKey, encAESKey);
-          print(
-            "DECRYPT DEBUG: rsa_oaep_sha256_aes_key=${rawAESKey.length} bytes",
-          );
         } catch (e) {
           throw Exception("RSA AES key decrypt failed: $e");
         }
@@ -247,11 +304,9 @@ class _TransactionPageState extends State<TransactionPage> {
                   ciphertext,
                   authTag,
                 );
-          print("DECRYPT DEBUG: aes_mode=${authTag == null ? 'CBC' : 'GCM'}");
         } catch (e) {
           throw Exception("AES payload decrypt failed: $e");
         }
-        print("DECRYPTED QR PLAINTEXT: $plaintext");
 
         final decryptedTransaction = jsonDecode(plaintext);
         if (decryptedTransaction is! Map<String, dynamic>) {
@@ -267,8 +322,6 @@ class _TransactionPageState extends State<TransactionPage> {
         rawDisplayTransaction.addAll(buildDisplayTransactionData(decodedQR));
         parsedTransaction.addAll(normalizeTransactionData(decodedQR));
       }
-
-      print("PARSED JSON TRANSACTION: $parsedTransaction");
     } on FormatException {
       final pairs = widget.qrData.split(",");
       for (var pair in pairs) {
@@ -283,10 +336,9 @@ class _TransactionPageState extends State<TransactionPage> {
         }
       }
       parsedTransaction.addAll(normalizeTransactionData(parsedTransaction));
-      print("PARSED TEXT TRANSACTION: $parsedTransaction");
     } catch (e) {
-      errorMessage = e.toString();
-      print("QR PARSE/DECRYPT ERROR: $e");
+      errorMessage =
+          "Unable to read this QR code. Please scan a valid transaction QR.";
     }
 
     if (mounted) {
@@ -300,7 +352,6 @@ class _TransactionPageState extends State<TransactionPage> {
       displayTransaction = rawDisplayTransaction;
       parseError = errorMessage;
     }
-    print("PARSED TRANSACTION: $transaction");
   }
 
   /// Send approval/rejection request to backend
@@ -326,8 +377,6 @@ class _TransactionPageState extends State<TransactionPage> {
         hash: hash,
       );
 
-      print("DECISION REQUEST: ${jsonEncode(requestBody)}");
-
       final response = await http.post(
         Uri.parse(
           "https://fyp-bank-backend.onrender.com/api/payments/decision/",
@@ -338,10 +387,6 @@ class _TransactionPageState extends State<TransactionPage> {
         },
         body: jsonEncode(requestBody),
       );
-
-      print("STATUS: ${response.statusCode}");
-      print("BODY: ${response.body}");
-      print("TOKEN: $token");
 
       final data = response.body.isNotEmpty ? jsonDecode(response.body) : {};
 
@@ -354,14 +399,21 @@ class _TransactionPageState extends State<TransactionPage> {
           MaterialPageRoute(builder: (_) => ApprovalPage(transaction: data)),
         );
       } else {
-        throw Exception(data["message"] ?? "Request failed");
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(friendlyDecisionError(response.statusCode, data)),
+          ),
+        );
       }
     } catch (e) {
-      print("ERROR: $e");
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text("Error: $e")));
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              "We could not process this transaction. Please try again.",
+            ),
+          ),
+        );
       }
     } finally {
       if (mounted) setState(() => isLoading = false);
@@ -414,9 +466,11 @@ class _TransactionPageState extends State<TransactionPage> {
       }
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text("Authentication error: $e")));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("Authentication could not be completed. Try again."),
+        ),
+      );
     }
   }
 
@@ -440,57 +494,84 @@ class _TransactionPageState extends State<TransactionPage> {
 
               // Transaction Card
               Card(
-                elevation: 3,
+                elevation: 4,
+                color: Colors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(18),
+                ),
                 child: Padding(
-                  padding: const EdgeInsets.all(20),
+                  padding: const EdgeInsets.all(24),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      const Text(
-                        "Transaction Details",
-                        style: TextStyle(
-                          fontSize: 22,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      const SizedBox(height: 16),
                       if (displayTransaction.isEmpty && parseError == null)
                         const Text(
                           "Loading transaction details...",
                           style: TextStyle(color: Colors.grey),
                         )
-                      else
-                        ...displayTransaction.entries.map(
-                          (entry) => Padding(
-                            padding: const EdgeInsets.only(bottom: 12),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  _formatFieldLabel(entry.key),
-                                  style: const TextStyle(
-                                    color: Colors.grey,
-                                    fontSize: 13,
-                                  ),
-                                ),
-                                const SizedBox(height: 4),
-                                Text(
-                                  entry.value?.toString() ?? "",
-                                  softWrap: true,
-                                  style: const TextStyle(
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                ),
-                              ],
-                            ),
+                      else if (parseError == null) ...[
+                        const Text(
+                          "Amount",
+                          textAlign: TextAlign.center,
+                          style: TextStyle(color: Colors.grey, fontSize: 14),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          _formatAmount(),
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            fontSize: 36,
+                            fontWeight: FontWeight.bold,
                           ),
                         ),
-                      if (parseError != null) ...[
                         const SizedBox(height: 10),
                         Text(
-                          "QR Error: $parseError",
-                          style: const TextStyle(color: Colors.red),
+                          transaction["merchant_reference"]?.toString() ??
+                              "Merchant reference unavailable",
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            color: Color(0xFF6F55A3),
+                            fontSize: 17,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        const SizedBox(height: 22),
+                        const Divider(height: 1),
+                        const SizedBox(height: 12),
+                        _detailRow(
+                          "Transaction ID",
+                          _shortId(transaction["id"]),
+                        ),
+                        _detailRow(
+                          "QR Session",
+                          _shortId(transaction["qr_session_id"]),
+                        ),
+                        _detailRow(
+                          "Account",
+                          _shortId(transaction["sender_account_id"]),
+                        ),
+                        _detailRow("Created", _formatCreatedAt()),
+                      ],
+                      if (parseError != null) ...[
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Icon(
+                              Icons.error_outline,
+                              color: Colors.red,
+                              size: 22,
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Text(
+                                parseError!,
+                                style: const TextStyle(
+                                  color: Colors.red,
+                                  fontSize: 15,
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
                       ],
                     ],
@@ -505,7 +586,15 @@ class _TransactionPageState extends State<TransactionPage> {
                 icon: const Icon(Icons.check),
                 label: const Text("Approve Payment"),
                 style: ElevatedButton.styleFrom(
-                  padding: const EdgeInsets.all(16),
+                  foregroundColor: const Color(0xFF6F55A3),
+                  backgroundColor: Colors.white,
+                  disabledForegroundColor: Colors.grey,
+                  disabledBackgroundColor: const Color(0xFFE7E0EA),
+                  elevation: 3,
+                  padding: const EdgeInsets.symmetric(vertical: 18),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(28),
+                  ),
                 ),
                 onPressed: isLoading || !_hasRequiredTransactionFields
                     ? null
@@ -522,8 +611,15 @@ class _TransactionPageState extends State<TransactionPage> {
                 icon: const Icon(Icons.close),
                 label: const Text("Reject Payment"),
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.red,
-                  padding: const EdgeInsets.all(16),
+                  foregroundColor: Colors.white,
+                  backgroundColor: const Color(0xFFF44336),
+                  disabledForegroundColor: Colors.grey,
+                  disabledBackgroundColor: const Color(0xFFE7E0EA),
+                  elevation: 3,
+                  padding: const EdgeInsets.symmetric(vertical: 18),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(28),
+                  ),
                 ),
                 onPressed: isLoading || !_hasRequiredTransactionFields
                     ? null
