@@ -2,7 +2,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
-import 'package:shared_preferences/shared_preferences.dart';
+//import 'package:shared_preferences/shared_preferences.dart';
 import 'package:local_auth/local_auth.dart';
 import 'approval_page.dart';
 import '../security/crypto_service.dart';
@@ -363,8 +363,8 @@ class _TransactionPageState extends State<TransactionPage> {
     setState(() => isLoading = true);
 
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('token') ?? '';
+      final secureStorage = const FlutterSecureStorage();
+      final token = await secureStorage.read(key: 'token') ?? '';
 
       if (token.isEmpty) {
         throw Exception('No token found. Please log in first.');
@@ -393,11 +393,17 @@ class _TransactionPageState extends State<TransactionPage> {
       if (!mounted) return;
 
       if (response.statusCode == 200) {
-        // Navigate to ApprovalPage with backend response
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (_) => ApprovalPage(transaction: data)),
-        );
+        if (action == "APPROVE") {
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(builder: (_) => ApprovalPage(transaction: data)),
+          );
+        } else {
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(builder: (_) => RejectedPage(transaction: data)),
+          );
+        }
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -423,6 +429,36 @@ class _TransactionPageState extends State<TransactionPage> {
   /// Authenticate user via biometrics before sending decision
   Future<void> _authenticateAndSend(String action, String plaintext) async {
     try {
+      // Parse amount safely
+      final amount = double.tryParse(transaction["amount"].toString()) ?? 0.0;
+
+      // Step 1: show popup BEFORE biometrics (only for high value approvals)
+      if (action == "APPROVE" && amount > 5000) {
+        final confirm = await showDialog<bool>(
+          context: context,
+          barrierDismissible: false,
+          builder: (dialogContext) => AlertDialog(
+            title: const Text("High Value Transaction"),
+            content: Text(
+              "This transaction is ${transaction["currency"] ?? ""} ${amount.toStringAsFixed(2)}.\n\nProceed to authentication?",
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, false),
+                child: const Text("Cancel"),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, true),
+                child: const Text("Continue"),
+              ),
+            ],
+          ),
+        );
+
+        if (confirm != true) return;
+      }
+
+      // Step 2: biometric authentication
       bool authenticated = await auth.authenticate(
         localizedReason: "Confirm transaction",
         biometricOnly: false,
@@ -463,7 +499,11 @@ class _TransactionPageState extends State<TransactionPage> {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(const SnackBar(content: Text("Authentication failed")));
+        return;
       }
+
+      // Step 3: send request
+      await _sendDecision(action);
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
