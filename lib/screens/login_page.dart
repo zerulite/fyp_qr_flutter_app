@@ -6,7 +6,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:local_auth/local_auth.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'register_page.dart';
-import '../security/crypto_service.dart';
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
