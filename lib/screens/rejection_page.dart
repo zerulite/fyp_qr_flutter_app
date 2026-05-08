@@ -3,10 +3,10 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'login_page.dart';
 import 'package:intl/intl.dart';
 
-class RejectedPage extends StatelessWidget {
+class RejectionPage extends StatelessWidget {
   final Map<String, dynamic> transaction;
 
-  const RejectedPage({super.key, required this.transaction});
+  const RejectionPage({super.key, required this.transaction});
 
   Future<void> _logout(BuildContext context) async {
     final prefs = await SharedPreferences.getInstance();

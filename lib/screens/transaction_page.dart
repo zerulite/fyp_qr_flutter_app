@@ -2,9 +2,11 @@ import 'dart:convert';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
-//import 'package:shared_preferences/shared_preferences.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:local_auth/local_auth.dart';
 import 'approval_page.dart';
+import 'rejection_page.dart';
 import '../security/crypto_service.dart';
 
 Map<String, dynamic> normalizeTransactionData(Map<String, dynamic> data) {
@@ -401,7 +403,7 @@ class _TransactionPageState extends State<TransactionPage> {
         } else {
           Navigator.pushReplacement(
             context,
-            MaterialPageRoute(builder: (_) => RejectedPage(transaction: data)),
+            MaterialPageRoute(builder: (_) => RejectionPage(transaction: data)),
           );
         }
       } else {
@@ -501,9 +503,6 @@ class _TransactionPageState extends State<TransactionPage> {
         ).showSnackBar(const SnackBar(content: Text("Authentication failed")));
         return;
       }
-
-      // Step 3: send request
-      await _sendDecision(action);
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
