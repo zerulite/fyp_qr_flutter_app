@@ -81,6 +81,7 @@ class _LoginPageState extends State<LoginPage> {
           key: 'email',
           value: emailController.text.trim(),
         );
+        await secureStorage.write(key: 'lastUser', value: accountId);
         await secureStorage.write(
           key: 'password',
           value: passwordController.text.trim(),
@@ -182,6 +183,7 @@ class _LoginPageState extends State<LoginPage> {
         final token = data['access_token'] ?? data['token'];
 
         await secureStorage.write(key: 'token', value: token);
+        await secureStorage.write(key: 'lastUser', value: email);
 
         if (!mounted) return;
 
