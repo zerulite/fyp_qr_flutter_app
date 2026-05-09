@@ -10,7 +10,10 @@
 .history
 .svn/
 .swiftpm/
+.vscode/
 migrate_working_dir/
+.linux/
+.windows/
 
 # IntelliJ related
 *.iml
