@@ -2,7 +2,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
-import 'package:shared_preferences/shared_preferences.dart';
+// import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:local_auth/local_auth.dart';
 import 'approval_page.dart';
@@ -273,13 +273,13 @@ class _TransactionPageState extends State<TransactionPage> {
         final encAESKey = base64Decode(encryptedKeyValue.toString());
         final iv = base64Decode(ivValue.toString());
         final ciphertext = base64Decode(ciphertextValue.toString());
+        final secureStorage = FlutterSecureStorage();
         final authTag = authTagValue == null
             ? null
             : base64Decode(authTagValue.toString());
 
         // access private key
-        final prefs = await SharedPreferences.getInstance();
-        final accountId = prefs.getString('lastUser');
+        final accountId = await secureStorage.read(key: 'lastUser');
         if (accountId == null) throw Exception("No logged in user");
 
         final privateKey = await CryptoService.getPrivateKey(
@@ -433,6 +433,7 @@ class _TransactionPageState extends State<TransactionPage> {
     try {
       // Parse amount safely
       final amount = double.tryParse(transaction["amount"].toString()) ?? 0.0;
+      final secureStorage = FlutterSecureStorage();
 
       // Step 1: show popup BEFORE biometrics (only for high value approvals)
       if (action == "APPROVE" && amount > 5000) {
@@ -476,8 +477,7 @@ class _TransactionPageState extends State<TransactionPage> {
         }
 
         // access private key
-        final prefs = await SharedPreferences.getInstance();
-        final accountId = prefs.getString('lastUser');
+        final accountId = await secureStorage.read(key: 'lastUser');
         if (accountId == null) return;
 
         final privateKey = await CryptoService.getPrivateKey(
