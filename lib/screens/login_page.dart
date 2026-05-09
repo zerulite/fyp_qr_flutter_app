@@ -1,8 +1,8 @@
 import 'dart:convert';
+import 'package:crypto/crypto.dart';
 import 'package:flutter/material.dart';
 import 'package:fyp_qr_scanner/screens/main_page.dart';
 import 'package:http/http.dart' as http;
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:local_auth/local_auth.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'register_page.dart';
@@ -16,11 +16,13 @@ class LoginPage extends StatefulWidget {
 
 class _LoginPageState extends State<LoginPage> {
   final _formKey = GlobalKey<FormState>();
+
   final emailController = TextEditingController();
   final passwordController = TextEditingController();
+
   final LocalAuthentication auth = LocalAuthentication();
 
-  // Secure storage
+  // Secure storage only
   final FlutterSecureStorage secureStorage = const FlutterSecureStorage();
 
   bool obscurePassword = true;
@@ -32,10 +34,15 @@ class _LoginPageState extends State<LoginPage> {
     _checkBiometricLogin();
   }
 
+  String hashPassword(String password) {
+    return sha256.convert(utf8.encode(password)).toString();
+  }
+
   Future<void> _checkBiometricLogin() async {
-    final prefs = await SharedPreferences.getInstance();
-    bool biometricEnabled = prefs.getBool("biometricEnabled") ?? false;
-    bool loggedIn = prefs.getBool("loggedIn") ?? false;
+    bool biometricEnabled =
+        await secureStorage.read(key: 'biometricEnabled') == 'true';
+
+    bool loggedIn = await secureStorage.read(key: 'loggedIn') == 'true';
 
     if (biometricEnabled && loggedIn) {
       await _biometricLogin();
@@ -48,15 +55,13 @@ class _LoginPageState extends State<LoginPage> {
     setState(() => loading = true);
 
     try {
-      final accountId = emailController.text.trim();
+      final email = emailController.text.trim();
+      final password = passwordController.text.trim();
 
       final response = await http.post(
         Uri.parse('https://fyp-bank-backend.onrender.com/api/auth/login'),
         headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          "email": accountId,
-          "password": passwordController.text.trim(),
-        }),
+        body: jsonEncode({"email": email, "password": password}),
       );
 
       print("Response Status: ${response.statusCode}");
@@ -66,26 +71,22 @@ class _LoginPageState extends State<LoginPage> {
         final data = jsonDecode(response.body);
 
         final token = data['access_token'] ?? data['token'];
+
         if (token == null || token.isEmpty) {
           throw Exception("No token returned from backend");
         }
 
-        final prefs = await SharedPreferences.getInstance();
+        // Hash password before storing
+        final hashedPassword = hashPassword(password);
 
-        // Store non-sensitive flags
-        await prefs.setBool('loggedIn', true);
+        // Store everything securely
+        await secureStorage.write(key: 'loggedIn', value: 'true');
 
-        // Store sensitive data securely
         await secureStorage.write(key: 'token', value: token);
-        await secureStorage.write(
-          key: 'email',
-          value: emailController.text.trim(),
-        );
-        await secureStorage.write(key: 'lastUser', value: accountId);
-        await secureStorage.write(
-          key: 'password',
-          value: passwordController.text.trim(),
-        );
+
+        await secureStorage.write(key: 'email', value: email);
+
+        await secureStorage.write(key: 'password_hash', value: hashedPassword);
 
         await _askEnableBiometric();
 
@@ -106,13 +107,16 @@ class _LoginPageState extends State<LoginPage> {
         context,
       ).showSnackBar(SnackBar(content: Text("Unexpected error: $e")));
     } finally {
-      if (mounted) setState(() => loading = false);
+      if (mounted) {
+        setState(() => loading = false);
+      }
     }
   }
 
   Future<void> _askEnableBiometric() async {
-    final prefs = await SharedPreferences.getInstance();
-    bool alreadyEnabled = prefs.getBool('biometricEnabled') ?? false;
+    bool alreadyEnabled =
+        await secureStorage.read(key: 'biometricEnabled') == 'true';
+
     if (alreadyEnabled) return;
 
     bool enable =
@@ -138,7 +142,7 @@ class _LoginPageState extends State<LoginPage> {
         false;
 
     if (enable) {
-      await prefs.setBool("biometricEnabled", true);
+      await secureStorage.write(key: 'biometricEnabled', value: 'true');
     }
   }
 
@@ -160,55 +164,30 @@ class _LoginPageState extends State<LoginPage> {
         return;
       }
 
-      final email = await secureStorage.read(key: 'email');
-      final password = await secureStorage.read(key: 'password');
+      // Use stored token directly
+      final token = await secureStorage.read(key: 'token');
 
-      if (email == null || password == null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("No saved credentials found")),
-        );
-        return;
-      }
-
-      setState(() => loading = true);
-
-      final response = await http.post(
-        Uri.parse('https://fyp-bank-backend.onrender.com/api/auth/login'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({"email": email, "password": password}),
-      );
-
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        final token = data['access_token'] ?? data['token'];
-
-        await secureStorage.write(key: 'token', value: token);
-        await secureStorage.write(key: 'lastUser', value: email);
-
-        if (!mounted) return;
-
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (_) => const MainPage()),
-        );
-      } else {
+      if (token == null || token.isEmpty) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(const SnackBar(content: Text("Biometric login failed")));
+        ).showSnackBar(const SnackBar(content: Text("No saved session found")));
+        return;
       }
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (_) => const MainPage()),
+      );
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text("Biometric authentication error")),
       );
-    } finally {
-      if (mounted) setState(() => loading = false);
     }
   }
 
   Future<void> _handleBiometricLogin() async {
-    final prefs = await SharedPreferences.getInstance();
-    bool biometricEnabled = prefs.getBool("biometricEnabled") ?? false;
+    bool biometricEnabled =
+        await secureStorage.read(key: 'biometricEnabled') == 'true';
 
     if (!biometricEnabled) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -249,7 +228,9 @@ class _LoginPageState extends State<LoginPage> {
                         size: 60,
                         color: Colors.blue,
                       ),
+
                       const SizedBox(height: 10),
+
                       const Text(
                         "Secure Pay",
                         style: TextStyle(
@@ -257,6 +238,7 @@ class _LoginPageState extends State<LoginPage> {
                           fontWeight: FontWeight.bold,
                         ),
                       ),
+
                       const SizedBox(height: 30),
 
                       TextFormField(
@@ -266,9 +248,12 @@ class _LoginPageState extends State<LoginPage> {
                           prefixIcon: Icon(Icons.email),
                           border: OutlineInputBorder(),
                         ),
-                        validator: (value) => value == null || value.isEmpty
-                            ? "Enter your email"
-                            : null,
+                        validator: (value) {
+                          if (value == null || value.isEmpty) {
+                            return "Enter your email";
+                          }
+                          return null;
+                        },
                       ),
 
                       const SizedBox(height: 20),
@@ -286,16 +271,19 @@ class _LoginPageState extends State<LoginPage> {
                                   : Icons.visibility_off,
                             ),
                             onPressed: () {
-                              setState(
-                                () => obscurePassword = !obscurePassword,
-                              );
+                              setState(() {
+                                obscurePassword = !obscurePassword;
+                              });
                             },
                           ),
                           border: const OutlineInputBorder(),
                         ),
-                        validator: (value) => value == null || value.isEmpty
-                            ? "Enter your password"
-                            : null,
+                        validator: (value) {
+                          if (value == null || value.isEmpty) {
+                            return "Enter your password";
+                          }
+                          return null;
+                        },
                       ),
 
                       const SizedBox(height: 30),
