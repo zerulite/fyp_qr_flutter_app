@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'package:crypto/crypto.dart';
 import 'package:flutter/material.dart';
 import 'package:fyp_qr_scanner/screens/main_page.dart';
 import 'package:http/http.dart' as http;
@@ -32,10 +31,6 @@ class _LoginPageState extends State<LoginPage> {
   void initState() {
     super.initState();
     _checkBiometricLogin();
-  }
-
-  String hashPassword(String password) {
-    return sha256.convert(utf8.encode(password)).toString();
   }
 
   Future<void> _checkBiometricLogin() async {
@@ -76,9 +71,6 @@ class _LoginPageState extends State<LoginPage> {
           throw Exception("No token returned from backend");
         }
 
-        // Hash password before storing
-        final hashedPassword = hashPassword(password);
-
         // Store everything securely
         await secureStorage.write(key: 'loggedIn', value: 'true');
 
@@ -86,7 +78,7 @@ class _LoginPageState extends State<LoginPage> {
 
         await secureStorage.write(key: 'email', value: email);
 
-        await secureStorage.write(key: 'password_hash', value: hashedPassword);
+        await secureStorage.write(key: 'password', value: password);
 
         await _askEnableBiometric();
 
@@ -164,24 +156,64 @@ class _LoginPageState extends State<LoginPage> {
         return;
       }
 
-      // Use stored token directly
-      final token = await secureStorage.read(key: 'token');
+      // Read stored credentials
+      final email = await secureStorage.read(key: 'email');
+      final password = await secureStorage.read(key: 'password');
 
-      if (token == null || token.isEmpty) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text("No saved session found")));
+      if (email == null ||
+          email.isEmpty ||
+          password == null ||
+          password.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("No saved credentials found")),
+        );
         return;
       }
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (_) => const MainPage()),
+
+      setState(() => loading = true);
+
+      // Call login API again
+      final response = await http.post(
+        Uri.parse('https://fyp-bank-backend.onrender.com/api/auth/login'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({"email": email, "password": password}),
       );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+
+        final token = data['access_token'] ?? data['token'];
+
+        if (token == null || token.isEmpty) {
+          throw Exception("No token returned");
+        }
+
+        // Save refreshed token
+        await secureStorage.write(key: 'token', value: token);
+
+        await secureStorage.write(key: 'loggedIn', value: 'true');
+
+        if (!mounted) return;
+
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (_) => const MainPage()),
+        );
+      } else {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text("Login failed")));
+      }
     } catch (e) {
       if (!mounted) return;
+
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text("Biometric authentication error")),
       );
+    } finally {
+      if (mounted) {
+        setState(() => loading = false);
+      }
     }
   }
 
