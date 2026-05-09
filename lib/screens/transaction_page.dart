@@ -156,6 +156,8 @@ class _TransactionPageState extends State<TransactionPage> {
   bool isLoading = false;
   String? parseError;
 
+  static const _logTag = "[TransactionPage]";
+
   @override
   void initState() {
     super.initState();
@@ -169,6 +171,35 @@ class _TransactionPageState extends State<TransactionPage> {
       transaction["amount"] != null &&
       transaction["merchant_reference"] != null &&
       transaction["created_at"] != null;
+
+  void _log(String message) {
+    debugPrint("$_logTag $message");
+  }
+
+  String _shortValue(dynamic value) {
+    final text = value?.toString() ?? "null";
+    if (text.length <= 12) return text;
+    return "${text.substring(0, 6)}...${text.substring(text.length - 4)}";
+  }
+
+  List<String> _missingRequiredFields(Map<String, dynamic> data) {
+    const requiredFields = [
+      "id",
+      "qr_session_id",
+      "sender_account_id",
+      "amount",
+      "merchant_reference",
+      "created_at",
+    ];
+
+    return requiredFields.where((field) => data[field] == null).toList();
+  }
+
+  String _previewText(String value) {
+    final sanitized = value.replaceAll(RegExp(r"\s+"), " ").trim();
+    if (sanitized.length <= 80) return sanitized;
+    return "${sanitized.substring(0, 80)}...";
+  }
 
   String _formatAmount() {
     final amount = transaction["amount"];
@@ -241,12 +272,21 @@ class _TransactionPageState extends State<TransactionPage> {
     final rawDisplayTransaction = <String, dynamic>{};
     String? errorMessage;
 
+    _log(
+      "Start parsing QR data. length=${widget.qrData.length}, "
+      "preview=${_previewText(widget.qrData)}",
+    );
+
     try {
       final decodedQR = jsonDecode(widget.qrData);
+      _log("QR JSON decoded. type=${decodedQR.runtimeType}");
 
       if (decodedQR is! Map<String, dynamic>) {
+        _log("QR JSON is not a Map. type=${decodedQR.runtimeType}");
         throw const FormatException("QR JSON is not an object");
       }
+
+      _log("QR JSON keys=${decodedQR.keys.toList()}");
 
       final encryptedKeyValue =
           decodedQR["encAES"] ??
@@ -268,6 +308,11 @@ class _TransactionPageState extends State<TransactionPage> {
           ivValue != null &&
           ciphertextValue != null;
 
+      _log(
+        "Encrypted payload detected=$hasEncryptedPayload, "
+        "hasAuthTag=${authTagValue != null}",
+      );
+
       if (hasEncryptedPayload) {
         // decode base64 (require update from qr_session)
         final encAESKey = base64Decode(encryptedKeyValue.toString());
@@ -277,21 +322,32 @@ class _TransactionPageState extends State<TransactionPage> {
         final authTag = authTagValue == null
             ? null
             : base64Decode(authTagValue.toString());
+        _log(
+          "Encrypted payload base64 decoded. encAESBytes=${encAESKey.length}, "
+          "ivBytes=${iv.length}, cipherBytes=${ciphertext.length}, "
+          "authTagBytes=${authTag?.length ?? 0}",
+        );
 
         // access private key
         final accountId = await secureStorage.read(key: 'lastUser');
         if (accountId == null) throw Exception("No logged in user");
+        _log(
+          "Secure storage lastUser found. account=${_shortValue(accountId)}",
+        );
 
         final privateKey = await CryptoService.getPrivateKey(
           accountId: accountId,
         );
         if (privateKey == null) throw Exception("Lost Private key");
+        _log("Private key loaded for account=${_shortValue(accountId)}");
 
         // decrypt AES key with RSA private
         late final Uint8List rawAESKey;
         try {
           rawAESKey = CryptoService.decryptAESKeyWithRSA(privateKey, encAESKey);
+          _log("RSA AES key decrypt OK. aesKeyBytes=${rawAESKey.length}");
         } catch (e) {
+          _log("RSA AES key decrypt failed. error=$e");
           throw Exception("RSA AES key decrypt failed: $e");
         }
 
@@ -306,14 +362,27 @@ class _TransactionPageState extends State<TransactionPage> {
                   ciphertext,
                   authTag,
                 );
+          _log(
+            "AES payload decrypt OK. mode=${authTag == null ? "CBC" : "GCM"}, "
+            "plaintextLength=${plaintext.length}, "
+            "preview=${_previewText(plaintext)}",
+          );
         } catch (e) {
+          _log("AES payload decrypt failed. error=$e");
           throw Exception("AES payload decrypt failed: $e");
         }
 
         final decryptedTransaction = jsonDecode(plaintext);
         if (decryptedTransaction is! Map<String, dynamic>) {
+          _log(
+            "Decrypted transaction is not a Map. "
+            "type=${decryptedTransaction.runtimeType}",
+          );
           throw Exception("Invalid decrypted transaction");
         }
+        _log(
+          "Decrypted transaction keys=${decryptedTransaction.keys.toList()}",
+        );
         rawDisplayTransaction.addAll(
           buildDisplayTransactionData(decryptedTransaction),
         );
@@ -321,10 +390,12 @@ class _TransactionPageState extends State<TransactionPage> {
           normalizeTransactionData(decryptedTransaction),
         );
       } else {
+        _log("Using plain JSON QR payload.");
         rawDisplayTransaction.addAll(buildDisplayTransactionData(decodedQR));
         parsedTransaction.addAll(normalizeTransactionData(decodedQR));
       }
-    } on FormatException {
+    } on FormatException catch (e) {
+      _log("QR is not valid JSON object, trying key/value parser. error=$e");
       final pairs = widget.qrData.split(",");
       for (var pair in pairs) {
         final kv = pair.split(":");
@@ -338,10 +409,23 @@ class _TransactionPageState extends State<TransactionPage> {
         }
       }
       parsedTransaction.addAll(normalizeTransactionData(parsedTransaction));
-    } catch (e) {
+      _log(
+        "Key/value parser completed. keys=${parsedTransaction.keys.toList()}, "
+        "missingRequired=${_missingRequiredFields(parsedTransaction)}",
+      );
+    } catch (e, stackTrace) {
+      _log("QR parse failed. error=$e");
+      _log("QR parse stackTrace=$stackTrace");
       errorMessage =
           "Unable to read this QR code. Please scan a valid transaction QR.";
     }
+
+    _log(
+      "Parse result. transactionKeys=${parsedTransaction.keys.toList()}, "
+      "displayKeys=${rawDisplayTransaction.keys.toList()}, "
+      "missingRequired=${_missingRequiredFields(parsedTransaction)}, "
+      "parseError=$errorMessage",
+    );
 
     if (mounted) {
       setState(() {
@@ -362,11 +446,13 @@ class _TransactionPageState extends State<TransactionPage> {
     required String signature,
     required String hash,
   }) async {
+    _log("Sending decision. action=$action");
     setState(() => isLoading = true);
 
     try {
       final secureStorage = const FlutterSecureStorage();
       final token = await secureStorage.read(key: 'token') ?? '';
+      _log("Token loaded. hasToken=${token.isNotEmpty}");
 
       if (token.isEmpty) {
         throw Exception('No token found. Please log in first.');
@@ -377,6 +463,12 @@ class _TransactionPageState extends State<TransactionPage> {
         action: action,
         signature: signature,
         hash: hash,
+      );
+      _log(
+        "Decision request body prepared. keys=${requestBody.keys.toList()}, "
+        "transactionId=${_shortValue(requestBody["transaction_id"])}, "
+        "qrSessionId=${_shortValue(requestBody["qr_session_id"])}, "
+        "hash=${_shortValue(hash)}, signatureLength=${signature.length}",
       );
 
       final response = await http.post(
@@ -391,6 +483,11 @@ class _TransactionPageState extends State<TransactionPage> {
       );
 
       final data = response.body.isNotEmpty ? jsonDecode(response.body) : {};
+      _log(
+        "Decision response received. status=${response.statusCode}, "
+        "bodyLength=${response.body.length}, "
+        "keys=${data is Map ? data.keys.toList() : data.runtimeType}",
+      );
 
       if (!mounted) return;
 
@@ -407,13 +504,19 @@ class _TransactionPageState extends State<TransactionPage> {
           );
         }
       } else {
+        _log(
+          "Decision rejected by backend. status=${response.statusCode}, "
+          "message=${data is Map ? data["message"] ?? data["error"] : null}",
+        );
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(friendlyDecisionError(response.statusCode, data)),
           ),
         );
       }
-    } catch (e) {
+    } catch (e, stackTrace) {
+      _log("Decision request failed. action=$action, error=$e");
+      _log("Decision stackTrace=$stackTrace");
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -430,13 +533,20 @@ class _TransactionPageState extends State<TransactionPage> {
 
   /// Authenticate user via biometrics before sending decision
   Future<void> _authenticateAndSend(String action, String plaintext) async {
+    _log(
+      "Authenticate flow started. action=$action, "
+      "hasRequiredFields=$_hasRequiredTransactionFields, "
+      "missingRequired=${_missingRequiredFields(transaction)}",
+    );
     try {
       // Parse amount safely
       final amount = double.tryParse(transaction["amount"].toString()) ?? 0.0;
       final secureStorage = FlutterSecureStorage();
+      _log("Transaction amount parsed. amount=$amount");
 
       // Step 1: show popup BEFORE biometrics (only for high value approvals)
       if (action == "APPROVE" && amount > 5000) {
+        _log("High value approval detected. Showing confirmation dialog.");
         final confirm = await showDialog<bool>(
           context: context,
           barrierDismissible: false,
@@ -458,10 +568,12 @@ class _TransactionPageState extends State<TransactionPage> {
           ),
         );
 
+        _log("High value confirmation result=$confirm");
         if (confirm != true) return;
       }
 
       // Step 2: biometric authentication
+      _log("Starting local authentication.");
       bool authenticated = await auth.authenticate(
         localizedReason: "Confirm transaction",
         biometricOnly: false,
@@ -472,24 +584,42 @@ class _TransactionPageState extends State<TransactionPage> {
       if (!mounted) return;
 
       if (authenticated) {
+        _log("Local authentication succeeded.");
         if (!_hasRequiredTransactionFields) {
+          _log(
+            "Transaction data incomplete after auth. "
+            "missingRequired=${_missingRequiredFields(transaction)}",
+          );
           throw Exception("Transaction data is incomplete");
         }
 
         // access private key
         final accountId = await secureStorage.read(key: 'lastUser');
-        if (accountId == null) return;
+        if (accountId == null) {
+          _log("No lastUser found in secure storage.");
+          return;
+        }
+        _log("Signing account found. account=${_shortValue(accountId)}");
 
         final privateKey = await CryptoService.getPrivateKey(
           accountId: accountId,
         );
-        if (privateKey == null) return;
+        if (privateKey == null) {
+          _log("Private key missing for account=${_shortValue(accountId)}");
+          return;
+        }
+        _log("Private key loaded for signing.");
 
         final integrityPlaintext = buildIntegrityPlaintext(transaction);
         final hashDigest = CryptoService.getHashHex(integrityPlaintext);
+        _log(
+          "Integrity plaintext built. length=${integrityPlaintext.length}, "
+          "hash=${_shortValue(hashDigest)}",
+        );
 
         // Sign the same hash value the server verifies.
         final signature = CryptoService.signData(privateKey, hashDigest);
+        _log("Signature generated. signatureLength=${signature.length}");
 
         // send decision, sign, hash back to server
         await _sendDecision(
@@ -498,12 +628,15 @@ class _TransactionPageState extends State<TransactionPage> {
           hash: hashDigest,
         );
       } else {
+        _log("Local authentication failed or was cancelled.");
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(const SnackBar(content: Text("Authentication failed")));
         return;
       }
-    } catch (e) {
+    } catch (e, stackTrace) {
+      _log("Authenticate flow failed. action=$action, error=$e");
+      _log("Authenticate stackTrace=$stackTrace");
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
