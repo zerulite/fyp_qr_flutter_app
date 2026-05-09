@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 // import 'package:shared_preferences/shared_preferences.dart';
@@ -151,10 +150,8 @@ class TransactionPage extends StatefulWidget {
 
 class _TransactionPageState extends State<TransactionPage> {
   final LocalAuthentication auth = LocalAuthentication();
-  Map<String, dynamic> transaction = {};
-  Map<String, dynamic> displayTransaction = {};
+  late Map<String, dynamic> transaction;
   bool isLoading = false;
-  String? parseError;
 
   static const _logTag = "[TransactionPage]";
 
@@ -402,10 +399,7 @@ class _TransactionPageState extends State<TransactionPage> {
         if (kv.length >= 2) {
           final key = kv[0].trim();
           final value = kv.sublist(1).join(":").trim();
-          parsedTransaction[key] = value;
-          if (buildDisplayTransactionData({key: value}).isNotEmpty) {
-            rawDisplayTransaction[key] = value;
-          }
+          transaction[key] = value;
         }
       }
       parsedTransaction.addAll(normalizeTransactionData(parsedTransaction));
@@ -438,6 +432,7 @@ class _TransactionPageState extends State<TransactionPage> {
       displayTransaction = rawDisplayTransaction;
       parseError = errorMessage;
     }
+    print("PARSED TRANSACTION: $transaction");
   }
 
   /// Send approval/rejection request to backend
@@ -479,8 +474,15 @@ class _TransactionPageState extends State<TransactionPage> {
           "Content-Type": "application/json",
           "Authorization": "Bearer $token",
         },
-        body: jsonEncode(requestBody),
+        body: jsonEncode({
+          "transaction_id": transaction["transaction_id"],
+          "qr_session_id": transaction["qr_session_id"],
+          "action": action,
+        }),
       );
+
+      print("STATUS: ${response.statusCode}");
+      print("BODY: ${response.body}");
 
       final data = response.body.isNotEmpty ? jsonDecode(response.body) : {};
       _log(
@@ -518,13 +520,9 @@ class _TransactionPageState extends State<TransactionPage> {
       _log("Decision request failed. action=$action, error=$e");
       _log("Decision stackTrace=$stackTrace");
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              "We could not process this transaction. Please try again.",
-            ),
-          ),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text("Error: $e")));
       }
     } finally {
       if (mounted) setState(() => isLoading = false);
@@ -638,11 +636,9 @@ class _TransactionPageState extends State<TransactionPage> {
       _log("Authenticate flow failed. action=$action, error=$e");
       _log("Authenticate stackTrace=$stackTrace");
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text("Authentication could not be completed. Try again."),
-        ),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text("Authentication error: $e")));
     }
   }
 
@@ -650,164 +646,93 @@ class _TransactionPageState extends State<TransactionPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text("Confirm Payment")),
-      body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              const SizedBox(height: 20),
-              const Text(
-                "Payment Confirmation",
-                style: TextStyle(fontSize: 26, fontWeight: FontWeight.bold),
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 20),
+      body: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const SizedBox(height: 20),
+            const Text(
+              "Payment Confirmation",
+              style: TextStyle(fontSize: 26, fontWeight: FontWeight.bold),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 20),
 
-              // Transaction Card
-              Card(
-                elevation: 4,
-                color: Colors.white,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(18),
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.all(24),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      if (displayTransaction.isEmpty && parseError == null)
-                        const Text(
-                          "Loading transaction details...",
-                          style: TextStyle(color: Colors.grey),
-                        )
-                      else if (parseError == null) ...[
-                        const Text(
-                          "Amount",
-                          textAlign: TextAlign.center,
-                          style: TextStyle(color: Colors.grey, fontSize: 14),
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          _formatAmount(),
-                          textAlign: TextAlign.center,
-                          style: const TextStyle(
-                            fontSize: 36,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        const SizedBox(height: 10),
-                        Text(
-                          transaction["merchant_reference"]?.toString() ??
-                              "Merchant reference unavailable",
-                          textAlign: TextAlign.center,
-                          style: const TextStyle(
-                            color: Color(0xFF6F55A3),
-                            fontSize: 17,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                        const SizedBox(height: 22),
-                        const Divider(height: 1),
-                        const SizedBox(height: 12),
-                        _detailRow(
-                          "Transaction ID",
-                          _shortId(transaction["id"]),
-                        ),
-                        _detailRow(
-                          "QR Session",
-                          _shortId(transaction["qr_session_id"]),
-                        ),
-                        _detailRow(
-                          "Account",
-                          _shortId(transaction["sender_account_id"]),
-                        ),
-                        _detailRow("Created", _formatCreatedAt()),
-                      ],
-                      if (parseError != null) ...[
-                        Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Icon(
-                              Icons.error_outline,
-                              color: Colors.red,
-                              size: 22,
-                            ),
-                            const SizedBox(width: 10),
-                            Expanded(
-                              child: Text(
-                                parseError!,
-                                style: const TextStyle(
-                                  color: Colors.red,
-                                  fontSize: 15,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
-              ),
-
-              const SizedBox(height: 32),
-
-              // Approve Button
-              ElevatedButton.icon(
-                icon: const Icon(Icons.check),
-                label: const Text("Approve Payment"),
-                style: ElevatedButton.styleFrom(
-                  foregroundColor: const Color(0xFF6F55A3),
-                  backgroundColor: Colors.white,
-                  disabledForegroundColor: Colors.grey,
-                  disabledBackgroundColor: const Color(0xFFE7E0EA),
-                  elevation: 3,
-                  padding: const EdgeInsets.symmetric(vertical: 18),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(28),
-                  ),
-                ),
-                onPressed: isLoading || !_hasRequiredTransactionFields
-                    ? null
-                    : () => _authenticateAndSend(
-                        "APPROVE",
-                        transaction["transaction_id"].toString(),
+            // Transaction Card
+            Card(
+              elevation: 3,
+              child: Padding(
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Text(
+                      transaction["merchant_reference"] ?? "Unknown Merchant",
+                      style: const TextStyle(
+                        fontSize: 22,
+                        fontWeight: FontWeight.bold,
                       ),
-              ),
-
-              const SizedBox(height: 10),
-
-              // Reject Button
-              ElevatedButton.icon(
-                icon: const Icon(Icons.close),
-                label: const Text("Reject Payment"),
-                style: ElevatedButton.styleFrom(
-                  foregroundColor: Colors.white,
-                  backgroundColor: const Color(0xFFF44336),
-                  disabledForegroundColor: Colors.grey,
-                  disabledBackgroundColor: const Color(0xFFE7E0EA),
-                  elevation: 3,
-                  padding: const EdgeInsets.symmetric(vertical: 18),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(28),
-                  ),
-                ),
-                onPressed: isLoading || !_hasRequiredTransactionFields
-                    ? null
-                    : () => _authenticateAndSend(
-                        "REJECT",
-                        transaction["transaction_id"].toString(),
+                    ),
+                    const SizedBox(height: 10),
+                    Text(
+                      "${transaction["currency"] ?? ""} ${transaction["amount"] ?? ""}",
+                      style: const TextStyle(
+                        fontSize: 32,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.green,
                       ),
-              ),
-
-              if (isLoading)
-                const Padding(
-                  padding: EdgeInsets.only(top: 20),
-                  child: LinearProgressIndicator(),
+                    ),
+                    const SizedBox(height: 10),
+                    Text(
+                      "Transaction ID: ${transaction["transaction_id"] ?? ""}",
+                      style: const TextStyle(color: Colors.grey),
+                    ),
+                    const SizedBox(height: 10),
+                    Text(
+                      "QR Session ID: ${transaction["qr_session_id"] ?? ""}",
+                      style: const TextStyle(color: Colors.grey),
+                    ),
+                  ],
                 ),
-            ],
-          ),
+              ),
+            ),
+
+            const Spacer(),
+
+            // Approve Button
+            ElevatedButton.icon(
+              icon: const Icon(Icons.check),
+              label: const Text("Approve Payment"),
+              style: ElevatedButton.styleFrom(
+                padding: const EdgeInsets.all(16),
+              ),
+              onPressed: isLoading
+                  ? null
+                  : () => _authenticateAndSend("APPROVE"),
+            ),
+
+            const SizedBox(height: 10),
+
+            // Reject Button
+            ElevatedButton.icon(
+              icon: const Icon(Icons.close),
+              label: const Text("Reject Payment"),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.red,
+                padding: const EdgeInsets.all(16),
+              ),
+              onPressed: isLoading
+                  ? null
+                  : () => _authenticateAndSend("REJECT"),
+            ),
+
+            if (isLoading)
+              const Padding(
+                padding: EdgeInsets.only(top: 20),
+                child: LinearProgressIndicator(),
+              ),
+          ],
         ),
       ),
     );
