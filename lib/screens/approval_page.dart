@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'login_page.dart';
 import 'package:intl/intl.dart';
 
@@ -9,8 +9,9 @@ class ApprovalPage extends StatelessWidget {
   const ApprovalPage({super.key, required this.transaction});
 
   Future<void> _logout(BuildContext context) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.remove('loggedIn'); // keep biometrics
+    final secureStorage = FlutterSecureStorage();
+    await secureStorage.write(key: 'loggedIn', value: 'false');
+    await secureStorage.delete(key: 'token');
 
     if (!context.mounted) return;
 

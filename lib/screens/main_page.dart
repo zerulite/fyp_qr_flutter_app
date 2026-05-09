@@ -1,10 +1,58 @@
 import 'package:flutter/material.dart';
-
 import 'qr_scanner_page.dart';
 import 'transaction_history.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'login_page.dart';
 
-class MainPage extends StatelessWidget {
+class MainPage extends StatefulWidget {
   const MainPage({super.key});
+
+  @override
+  State<MainPage> createState() => _MainPageState();
+}
+
+class _MainPageState extends State<MainPage> {
+  Future<void> _confirmLogout() async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text("Logout Confirmation"),
+        content: const Text(
+          "Are you sure you want to logout? You will need to login again.",
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text("Cancel"),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text("Logout", style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm == true) {
+      await _logout();
+    }
+  }
+
+  Future<void> _logout() async {
+    final secureStorage = const FlutterSecureStorage();
+
+    await secureStorage.write(key: 'loggedIn', value: 'false');
+
+    await secureStorage.delete(key: 'token');
+
+    if (!mounted) return;
+
+    Navigator.pushAndRemoveUntil(
+      context,
+      MaterialPageRoute(builder: (_) => const LoginPage()),
+      (route) => false,
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -12,6 +60,13 @@ class MainPage extends StatelessWidget {
       appBar: AppBar(
         title: const Text("Secure Pay Dashboard"),
         centerTitle: true,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.logout),
+            tooltip: "Logout",
+            onPressed: _confirmLogout,
+          ),
+        ],
       ),
       body: Padding(
         padding: const EdgeInsets.all(16),
@@ -111,7 +166,7 @@ class MainPage extends StatelessWidget {
             children: [
               CircleAvatar(
                 radius: 26,
-                backgroundColor: color.withOpacity(0.15),
+                backgroundColor: color.withValues(alpha: 0.15),
                 child: Icon(icon, color: color, size: 28),
               ),
               const SizedBox(width: 15),

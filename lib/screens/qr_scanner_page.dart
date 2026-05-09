@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'transaction_page.dart';
 import 'login_page.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 class QRScannerPage extends StatefulWidget {
   const QRScannerPage({super.key});
@@ -41,8 +41,9 @@ class _QRScannerPageState extends State<QRScannerPage> {
   }
 
   Future<void> _logout() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.remove('loggedIn'); // keep biometrics
+    final secureStorage = FlutterSecureStorage();
+    await secureStorage.write(key: 'loggedIn', value: 'false');
+    await secureStorage.delete(key: 'token');
 
     if (!mounted) return;
 

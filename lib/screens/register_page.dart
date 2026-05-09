@@ -45,6 +45,9 @@ class _RegisterPageState extends State<RegisterPage> {
       setState(() => loading = false);
 
       if (response.statusCode == 200 || response.statusCode == 201) {
+        print(
+          response.body,
+        ); // print server response to show card details and stuff first
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text("Registration successful! Please login."),
