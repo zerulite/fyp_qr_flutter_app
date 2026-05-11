@@ -18,7 +18,9 @@ class _RegisterPageState extends State<RegisterPage> {
   final passwordController = TextEditingController();
   final confirmPasswordController = TextEditingController();
   final phoneController = TextEditingController();
+  final transactionPinController = TextEditingController();
   bool obscurePassword = true;
+  bool obscureTransactionPin = true;
   bool loading = false;
 
   Future<void> _register() async {
@@ -53,6 +55,7 @@ class _RegisterPageState extends State<RegisterPage> {
           'password': passwordController.text.trim(),
           'phone_number': phoneController.text.trim(),
           'public_key': pubKeyStr, // add in public key for send back package
+          'transaction_pin': transactionPinController.text.trim(),
         }),
       );
 
@@ -76,7 +79,11 @@ class _RegisterPageState extends State<RegisterPage> {
       } else {
         final error = jsonDecode(response.body);
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(error['message'] ?? 'Registration failed')),
+          SnackBar(
+            content: Text(
+              error['message'] ?? error['error'] ?? 'Registration failed',
+            ),
+          ),
         );
       }
     } catch (e) {
@@ -181,6 +188,39 @@ class _RegisterPageState extends State<RegisterPage> {
                         validator: (value) => value == null || value.isEmpty
                             ? "Confirm your password"
                             : null,
+                      ),
+                      const SizedBox(height: 20),
+                      TextFormField(
+                        controller: transactionPinController,
+                        obscureText: obscureTransactionPin,
+                        keyboardType: TextInputType.number,
+                        decoration: InputDecoration(
+                          labelText: "Transaction PIN",
+                          prefixIcon: const Icon(Icons.pin),
+                          suffixIcon: IconButton(
+                            icon: Icon(
+                              obscureTransactionPin
+                                  ? Icons.visibility
+                                  : Icons.visibility_off,
+                            ),
+                            onPressed: () {
+                              setState(() {
+                                obscureTransactionPin = !obscureTransactionPin;
+                              });
+                            },
+                          ),
+                          border: const OutlineInputBorder(),
+                        ),
+                        validator: (value) {
+                          final pin = value?.trim() ?? '';
+                          if (pin.isEmpty) {
+                            return "Enter transaction PIN";
+                          }
+                          if (!RegExp(r'^\d{4,6}$').hasMatch(pin)) {
+                            return "Transaction PIN must be 4 to 6 digits";
+                          }
+                          return null;
+                        },
                       ),
                       const SizedBox(height: 30),
                       SizedBox(

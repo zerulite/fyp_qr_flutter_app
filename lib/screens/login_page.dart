@@ -78,6 +78,8 @@ class _LoginPageState extends State<LoginPage> {
 
         await secureStorage.write(key: 'email', value: email);
 
+        await secureStorage.write(key: 'lastUser', value: email);
+
         await secureStorage.write(key: 'password', value: password);
 
         await _askEnableBiometric();
@@ -190,6 +192,8 @@ class _LoginPageState extends State<LoginPage> {
 
         // Save refreshed token
         await secureStorage.write(key: 'token', value: token);
+
+        await secureStorage.write(key: 'lastUser', value: email);
 
         await secureStorage.write(key: 'loggedIn', value: 'true');
 

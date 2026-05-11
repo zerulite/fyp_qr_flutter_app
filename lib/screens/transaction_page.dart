@@ -62,8 +62,9 @@ Map<String, dynamic> buildDecisionRequestBody({
   required String action,
   required String signature,
   required String hash,
+  String? transactionPin,
 }) {
-  return {
+  final body = {
     "id": transaction["id"] ?? transaction["transaction_id"],
     "transaction_id": transaction["transaction_id"],
     "transactionId": transaction["transaction_id"],
@@ -84,6 +85,12 @@ Map<String, dynamic> buildDecisionRequestBody({
     "signature": signature,
     "hash": hash,
   };
+
+  if (transactionPin != null) {
+    body["transaction_pin"] = transactionPin;
+  }
+
+  return body;
 }
 
 String buildIntegrityPlaintext(Map<String, dynamic> transaction) {
@@ -112,14 +119,14 @@ String buildIntegrityPlaintext(Map<String, dynamic> transaction) {
 String friendlyDecisionError(int statusCode, Map<String, dynamic> data) {
   final message = data["message"] ?? data["error"];
 
+  if (message is String && message.isNotEmpty && statusCode >= 400) {
+    return message;
+  }
   if (statusCode == 401) {
     return "We could not verify this transaction. Please try again.";
   }
   if (statusCode == 404) {
     return "This transaction is no longer available.";
-  }
-  if (message is String && message.isNotEmpty && statusCode >= 400) {
-    return message;
   }
   return "We could not process this transaction. Please try again.";
 }
@@ -264,6 +271,79 @@ class _TransactionPageState extends State<TransactionPage> {
         ],
       ),
     );
+  }
+
+  Future<String?> _promptForTransactionPin(double amount) async {
+    final pinController = TextEditingController();
+    final formKey = GlobalKey<FormState>();
+    bool obscurePin = true;
+
+    try {
+      return showDialog<String>(
+        context: context,
+        barrierDismissible: false,
+        builder: (dialogContext) => StatefulBuilder(
+          builder: (context, setDialogState) => AlertDialog(
+            title: const Text("Transaction PIN Required"),
+            content: Form(
+              key: formKey,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    "This transaction is ${transaction["currency"] ?? ""} ${amount.toStringAsFixed(2)}.",
+                  ),
+                  const SizedBox(height: 16),
+                  TextFormField(
+                    controller: pinController,
+                    autofocus: true,
+                    obscureText: obscurePin,
+                    keyboardType: TextInputType.number,
+                    decoration: InputDecoration(
+                      labelText: "Transaction PIN",
+                      prefixIcon: const Icon(Icons.pin),
+                      suffixIcon: IconButton(
+                        icon: Icon(
+                          obscurePin ? Icons.visibility : Icons.visibility_off,
+                        ),
+                        onPressed: () {
+                          setDialogState(() => obscurePin = !obscurePin);
+                        },
+                      ),
+                      border: const OutlineInputBorder(),
+                    ),
+                    validator: (value) {
+                      final pin = value?.trim() ?? "";
+                      if (pin.isEmpty) return "Enter transaction PIN";
+                      if (!RegExp(r'^\d{4,6}$').hasMatch(pin)) {
+                        return "Transaction PIN must be 4 to 6 digits";
+                      }
+                      return null;
+                    },
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext),
+                child: const Text("Cancel"),
+              ),
+              TextButton(
+                onPressed: () {
+                  if (formKey.currentState!.validate()) {
+                    Navigator.pop(dialogContext, pinController.text.trim());
+                  }
+                },
+                child: const Text("Continue"),
+              ),
+            ],
+          ),
+        ),
+      );
+    } finally {
+      pinController.dispose();
+    }
   }
 
   /// Parse QR code: tries encrypted JSON first, plain JSON second, else key/value pairs.
@@ -445,6 +525,7 @@ class _TransactionPageState extends State<TransactionPage> {
     required String action,
     required String signature,
     required String hash,
+    String? transactionPin,
   }) async {
     _log("Sending decision. action=$action");
     setState(() => isLoading = true);
@@ -463,6 +544,7 @@ class _TransactionPageState extends State<TransactionPage> {
         action: action,
         signature: signature,
         hash: hash,
+        transactionPin: transactionPin,
       );
       _log(
         "Decision request body prepared. keys=${requestBody.keys.toList()}, "
@@ -542,34 +624,16 @@ class _TransactionPageState extends State<TransactionPage> {
       // Parse amount safely
       final amount = double.tryParse(transaction["amount"].toString()) ?? 0.0;
       final secureStorage = FlutterSecureStorage();
+      String? transactionPin;
       _log("Transaction amount parsed. amount=$amount");
 
-      // Step 1: show popup BEFORE biometrics (only for high value approvals)
+      // Step 1: request transaction PIN BEFORE biometrics (only for high value approvals)
       if (action == "APPROVE" && amount > 5000) {
-        _log("High value approval detected. Showing confirmation dialog.");
-        final confirm = await showDialog<bool>(
-          context: context,
-          barrierDismissible: false,
-          builder: (dialogContext) => AlertDialog(
-            title: const Text("High Value Transaction"),
-            content: Text(
-              "This transaction is ${transaction["currency"] ?? ""} ${amount.toStringAsFixed(2)}.\n\nProceed to authentication?",
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(dialogContext, false),
-                child: const Text("Cancel"),
-              ),
-              TextButton(
-                onPressed: () => Navigator.pop(dialogContext, true),
-                child: const Text("Continue"),
-              ),
-            ],
-          ),
-        );
+        _log("High value approval detected. Requesting transaction PIN.");
+        transactionPin = await _promptForTransactionPin(amount);
 
-        _log("High value confirmation result=$confirm");
-        if (confirm != true) return;
+        _log("High value PIN entered=${transactionPin != null}");
+        if (transactionPin == null) return;
       }
 
       // Step 2: biometric authentication
@@ -626,6 +690,7 @@ class _TransactionPageState extends State<TransactionPage> {
           action: action,
           signature: signature,
           hash: hashDigest,
+          transactionPin: transactionPin,
         );
       } else {
         _log("Local authentication failed or was cancelled.");
