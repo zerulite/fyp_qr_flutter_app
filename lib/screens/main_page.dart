@@ -3,6 +3,7 @@ import 'qr_scanner_page.dart';
 import 'transaction_history.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'login_page.dart';
+import 'account_page.dart';
 
 class MainPage extends StatefulWidget {
   const MainPage({super.key});
@@ -133,10 +134,9 @@ class _MainPageState extends State<MainPage> {
               icon: Icons.person,
               color: Colors.orange,
               onTap: () {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text("Account page not implemented yet"),
-                  ),
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const AccountPage()),
                 );
               },
             ),
