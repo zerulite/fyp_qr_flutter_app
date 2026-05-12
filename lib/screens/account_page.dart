@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 class AccountPage extends StatefulWidget {
   const AccountPage({super.key});
@@ -12,32 +13,66 @@ class AccountPage extends StatefulWidget {
 
 class _AccountPageState extends State<AccountPage> {
   Map<String, dynamic>? accountData;
+  List<dynamic> cards = [];
+
   bool isLoading = true;
+  int currentCardIndex = 0;
+
+  final PageController _pageController = PageController(viewportFraction: 0.85);
 
   @override
   void initState() {
     super.initState();
-    fetchAccount();
+    fetchAll();
   }
 
-  Future<void> fetchAccount() async {
-    try {
-      final res = await http.get(
-        Uri.parse("https://your-api.com/api/account"),
-        headers: {"Authorization": "Bearer YOUR_TOKEN"},
-      );
+  Future<void> fetchAll() async {
+    setState(() => isLoading = true);
 
-      if (res.statusCode == 200) {
-        setState(() {
-          accountData = jsonDecode(res.body);
-          isLoading = false;
-        });
-      } else {
-        throw Exception("Failed to load account");
-      }
+    try {
+      final results = await Future.wait([fetchAccount(), fetchCards()]);
+
+      setState(() {
+        accountData = results[0] as Map<String, dynamic>;
+        cards = results[1] as List<dynamic>;
+        isLoading = false;
+      });
     } catch (e) {
       setState(() => isLoading = false);
       debugPrint("Error: $e");
+    }
+  }
+
+  Future<Map<String, dynamic>> fetchAccount() async {
+    final secureStorage = const FlutterSecureStorage();
+    final token = await secureStorage.read(key: 'token');
+
+    final res = await http.get(
+      Uri.parse("https://fyp-bank-backend.onrender.com/api/account"),
+      headers: {"Authorization": "Bearer $token"},
+    );
+
+    if (res.statusCode == 200) {
+      return jsonDecode(res.body);
+    } else {
+      throw Exception("Failed to load account");
+    }
+  }
+
+  Future<List<dynamic>> fetchCards() async {
+    final secureStorage = const FlutterSecureStorage();
+    final token = await secureStorage.read(key: 'token');
+
+    final res = await http.get(
+      Uri.parse("https://fyp-bank-backend.onrender.com/api/accounts/cards"),
+      headers: {"Authorization": "Bearer $token"},
+    );
+
+    if (res.statusCode == 200) {
+      final decoded = jsonDecode(res.body);
+      return decoded['cards'] ?? [];
+    } else {
+      throw Exception("Failed to load cards");
     }
   }
 
@@ -63,12 +98,11 @@ class _AccountPageState extends State<AccountPage> {
     }
 
     final lastAccess = accountData!['last_access_record'] ?? {};
-    final cards = accountData!['cards'] ?? [];
 
     return Scaffold(
       appBar: AppBar(title: const Text("My Account")),
       body: RefreshIndicator(
-        onRefresh: fetchAccount,
+        onRefresh: fetchAll,
         child: SingleChildScrollView(
           physics: const AlwaysScrollableScrollPhysics(),
           padding: const EdgeInsets.all(16),
@@ -76,7 +110,7 @@ class _AccountPageState extends State<AccountPage> {
             children: [
               _buildAccountSummary(),
               const SizedBox(height: 20),
-              _buildCards(cards),
+              _buildCardCarousel(),
               const SizedBox(height: 20),
               _buildLastAccess(lastAccess),
             ],
@@ -119,7 +153,11 @@ class _AccountPageState extends State<AccountPage> {
     );
   }
 
-  Widget _buildCards(List cards) {
+  Widget _buildCardCarousel() {
+    if (cards.isEmpty) {
+      return const Text("No cards available");
+    }
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -127,22 +165,56 @@ class _AccountPageState extends State<AccountPage> {
           "Cards",
           style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
         ),
-        const SizedBox(height: 10),
+        const SizedBox(height: 15),
 
-        if (cards.isEmpty)
-          const Padding(
-            padding: EdgeInsets.symmetric(vertical: 10),
-            child: Text("No cards available"),
-          )
-        else
-          ...cards.map((card) => _cardWidget(card)).toList(),
+        SizedBox(
+          height: 180,
+          child: PageView.builder(
+            controller: _pageController,
+            itemCount: cards.length,
+            onPageChanged: (index) {
+              setState(() => currentCardIndex = index);
+            },
+            itemBuilder: (context, index) {
+              final card = cards[index];
+              final isActive = index == currentCardIndex;
+
+              return AnimatedContainer(
+                duration: const Duration(milliseconds: 300),
+                margin: EdgeInsets.symmetric(
+                  horizontal: 6,
+                  vertical: isActive ? 0 : 10,
+                ),
+                child: _cardWidget(card),
+              );
+            },
+          ),
+        ),
+
+        const SizedBox(height: 12),
+
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: List.generate(cards.length, (index) {
+            return Container(
+              margin: const EdgeInsets.symmetric(horizontal: 4),
+              width: currentCardIndex == index ? 10 : 6,
+              height: currentCardIndex == index ? 10 : 6,
+              decoration: BoxDecoration(
+                color: currentCardIndex == index
+                    ? Colors.blueAccent
+                    : Colors.grey,
+                shape: BoxShape.circle,
+              ),
+            );
+          }),
+        ),
       ],
     );
   }
 
   Widget _cardWidget(Map<String, dynamic> card) {
     return Container(
-      margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         gradient: const LinearGradient(
@@ -151,9 +223,9 @@ class _AccountPageState extends State<AccountPage> {
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.2),
-            blurRadius: 8,
-            offset: const Offset(0, 4),
+            color: Colors.black.withOpacity(0.25),
+            blurRadius: 10,
+            offset: const Offset(0, 6),
           ),
         ],
       ),
@@ -164,16 +236,16 @@ class _AccountPageState extends State<AccountPage> {
             card['card_name'],
             style: const TextStyle(color: Colors.white70),
           ),
-          const SizedBox(height: 10),
+          const Spacer(),
           Text(
             "**** **** **** ${card['card_last4']}",
             style: const TextStyle(
               color: Colors.white,
-              fontSize: 18,
+              fontSize: 20,
               letterSpacing: 2,
             ),
           ),
-          const SizedBox(height: 10),
+          const Spacer(),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
