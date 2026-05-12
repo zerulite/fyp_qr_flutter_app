@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:local_auth/local_auth.dart';
 
 class AccountPage extends StatefulWidget {
   const AccountPage({super.key});
@@ -19,6 +20,10 @@ class _AccountPageState extends State<AccountPage> {
   int currentCardIndex = 0;
 
   final PageController _pageController = PageController(viewportFraction: 0.85);
+  final LocalAuthentication auth = LocalAuthentication();
+
+  Set<int> revealedCards = {};
+  bool isAuthenticating = false;
 
   @override
   void initState() {
@@ -64,7 +69,7 @@ class _AccountPageState extends State<AccountPage> {
     final token = await secureStorage.read(key: 'token');
 
     final res = await http.get(
-      Uri.parse("https://fyp-bank-backend.onrender.com/api/accounts/cards"),
+      Uri.parse("https://fyp-bank-backend.onrender.com/api/account/cards"),
       headers: {"Authorization": "Bearer $token"},
     );
 
@@ -83,6 +88,46 @@ class _AccountPageState extends State<AccountPage> {
     } catch (_) {
       return iso;
     }
+  }
+
+  Future<bool> _authenticate() async {
+    try {
+      final canCheck = await auth.canCheckBiometrics;
+      final isSupported = await auth.isDeviceSupported();
+
+      if (!canCheck || !isSupported) return false;
+
+      setState(() => isAuthenticating = true);
+
+      final result = await auth.authenticate(
+        localizedReason: 'Authenticate to view card details',
+        biometricOnly: true,
+      );
+
+      setState(() => isAuthenticating = false);
+      return result;
+    } catch (e) {
+      setState(() => isAuthenticating = false);
+      return false;
+    }
+  }
+
+  Future<void> _handleReveal(int cardId) async {
+    if (revealedCards.contains(cardId)) {
+      setState(() => revealedCards.remove(cardId));
+      return;
+    }
+
+    final success = await _authenticate();
+    if (!success) return;
+
+    setState(() => revealedCards.add(cardId));
+
+    Future.delayed(const Duration(seconds: 10), () {
+      if (mounted) {
+        setState(() => revealedCards.remove(cardId));
+      }
+    });
   }
 
   @override
@@ -154,9 +199,7 @@ class _AccountPageState extends State<AccountPage> {
   }
 
   Widget _buildCardCarousel() {
-    if (cards.isEmpty) {
-      return const Text("No cards available");
-    }
+    if (cards.isEmpty) return const Text("No cards available");
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -168,52 +211,29 @@ class _AccountPageState extends State<AccountPage> {
         const SizedBox(height: 15),
 
         SizedBox(
-          height: 180,
+          height: 220,
           child: PageView.builder(
             controller: _pageController,
             itemCount: cards.length,
-            onPageChanged: (index) {
-              setState(() => currentCardIndex = index);
-            },
+            onPageChanged: (i) => setState(() => currentCardIndex = i),
             itemBuilder: (context, index) {
               final card = cards[index];
-              final isActive = index == currentCardIndex;
 
               return AnimatedContainer(
                 duration: const Duration(milliseconds: 300),
-                margin: EdgeInsets.symmetric(
-                  horizontal: 6,
-                  vertical: isActive ? 0 : 10,
-                ),
+                margin: const EdgeInsets.symmetric(horizontal: 6),
                 child: _cardWidget(card),
               );
             },
           ),
-        ),
-
-        const SizedBox(height: 12),
-
-        Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: List.generate(cards.length, (index) {
-            return Container(
-              margin: const EdgeInsets.symmetric(horizontal: 4),
-              width: currentCardIndex == index ? 10 : 6,
-              height: currentCardIndex == index ? 10 : 6,
-              decoration: BoxDecoration(
-                color: currentCardIndex == index
-                    ? Colors.blueAccent
-                    : Colors.grey,
-                shape: BoxShape.circle,
-              ),
-            );
-          }),
         ),
       ],
     );
   }
 
   Widget _cardWidget(Map<String, dynamic> card) {
+    final isRevealed = revealedCards.contains(card['id']);
+
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -221,13 +241,6 @@ class _AccountPageState extends State<AccountPage> {
           colors: [Colors.black87, Colors.black54],
         ),
         borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.25),
-            blurRadius: 10,
-            offset: const Offset(0, 6),
-          ),
-        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -236,16 +249,30 @@ class _AccountPageState extends State<AccountPage> {
             card['card_name'],
             style: const TextStyle(color: Colors.white70),
           ),
+
           const Spacer(),
+
           Text(
-            "**** **** **** ${card['card_last4']}",
+            isRevealed
+                ? card['card_number']
+                : "**** **** **** ${card['card_last4']}",
             style: const TextStyle(
               color: Colors.white,
               fontSize: 20,
               letterSpacing: 2,
             ),
           ),
+
+          if (isRevealed) ...[
+            const SizedBox(height: 8),
+            Text(
+              "CVV: ${card['cvv']}",
+              style: const TextStyle(color: Colors.white),
+            ),
+          ],
+
           const Spacer(),
+
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
@@ -262,6 +289,21 @@ class _AccountPageState extends State<AccountPage> {
                 ),
               ),
             ],
+          ),
+
+          const SizedBox(height: 10),
+
+          Align(
+            alignment: Alignment.bottomRight,
+            child: TextButton(
+              onPressed: isAuthenticating
+                  ? null
+                  : () => _handleReveal(card['id']),
+              child: Text(
+                isRevealed ? "Hide" : "Reveal",
+                style: const TextStyle(color: Colors.white),
+              ),
+            ),
           ),
         ],
       ),
