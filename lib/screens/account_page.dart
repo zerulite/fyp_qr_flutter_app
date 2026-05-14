@@ -101,7 +101,7 @@ class _AccountPageState extends State<AccountPage> {
 
       final result = await auth.authenticate(
         localizedReason: 'Authenticate to view card details',
-        biometricOnly: true,
+        biometricOnly: false,
       );
 
       setState(() => isAuthenticating = false);
