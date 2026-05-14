@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:local_auth/local_auth.dart';
 import '../security/crypto_service.dart';
+import '../security/screenshot_security_service.dart';
 
 class AccountPage extends StatefulWidget {
   const AccountPage({super.key});
@@ -31,6 +32,15 @@ class _AccountPageState extends State<AccountPage> {
   void initState() {
     super.initState();
     fetchAll();
+  }
+
+  @override
+  void dispose() {
+    for (final _ in revealedCards) {
+      ScreenshotSecurityService.disable();
+    }
+    _pageController.dispose();
+    super.dispose();
   }
 
   Future<void> fetchAll() async {
@@ -152,10 +162,7 @@ class _AccountPageState extends State<AccountPage> {
     final cardKey = _cardRevealKey(card);
 
     if (revealedCards.contains(cardKey)) {
-      setState(() {
-        revealedCards.remove(cardKey);
-        revealedCvvs.remove(cardKey);
-      });
+      await _hideRevealedCard(cardKey);
       return;
     }
 
@@ -166,6 +173,12 @@ class _AccountPageState extends State<AccountPage> {
       final cvv = await _decryptCardCvv(card);
       if (!mounted) return;
 
+      await ScreenshotSecurityService.enable();
+      if (!mounted) {
+        await ScreenshotSecurityService.disable();
+        return;
+      }
+
       setState(() {
         revealedCvvs[cardKey] = cvv;
         revealedCards.add(cardKey);
@@ -174,18 +187,30 @@ class _AccountPageState extends State<AccountPage> {
       if (!mounted) return;
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(SnackBar(content: Text("Unable to reveal CVV: $e")));
+      ).showSnackBar(const SnackBar(content: Text("Unable to reveal CVV.")));
       return;
     }
 
     Future.delayed(const Duration(seconds: 10), () {
       if (mounted) {
-        setState(() {
-          revealedCards.remove(cardKey);
-          revealedCvvs.remove(cardKey);
-        });
+        _hideRevealedCard(cardKey);
       }
     });
+  }
+
+  Future<void> _hideRevealedCard(String cardKey) async {
+    var wasRevealed = false;
+
+    if (mounted) {
+      setState(() {
+        wasRevealed = revealedCards.remove(cardKey);
+        revealedCvvs.remove(cardKey);
+      });
+    }
+
+    if (wasRevealed) {
+      await ScreenshotSecurityService.disable();
+    }
   }
 
   @override

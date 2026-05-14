@@ -8,6 +8,7 @@ import 'package:local_auth/local_auth.dart';
 import 'approval_page.dart';
 import 'rejection_page.dart';
 import '../security/crypto_service.dart';
+import '../security/screenshot_security_service.dart';
 
 Map<String, dynamic> normalizeTransactionData(Map<String, dynamic> data) {
   final transactionId =
@@ -147,6 +148,92 @@ Map<String, dynamic> buildDisplayTransactionData(Map<String, dynamic> data) {
   };
 }
 
+class _TransactionPinDialog extends StatefulWidget {
+  final String amountText;
+
+  const _TransactionPinDialog({required this.amountText});
+
+  @override
+  State<_TransactionPinDialog> createState() => _TransactionPinDialogState();
+}
+
+class _TransactionPinDialogState extends State<_TransactionPinDialog> {
+  final _pinController = TextEditingController();
+  final _formKey = GlobalKey<FormState>();
+  bool _obscurePin = true;
+
+  @override
+  void initState() {
+    super.initState();
+    ScreenshotSecurityService.enable();
+  }
+
+  @override
+  void dispose() {
+    ScreenshotSecurityService.disable();
+    _pinController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text("Transaction PIN Required"),
+      content: Form(
+        key: _formKey,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(widget.amountText),
+            const SizedBox(height: 16),
+            TextFormField(
+              controller: _pinController,
+              autofocus: true,
+              obscureText: _obscurePin,
+              keyboardType: TextInputType.number,
+              decoration: InputDecoration(
+                labelText: "Transaction PIN",
+                prefixIcon: const Icon(Icons.pin),
+                suffixIcon: IconButton(
+                  icon: Icon(
+                    _obscurePin ? Icons.visibility : Icons.visibility_off,
+                  ),
+                  onPressed: () {
+                    setState(() => _obscurePin = !_obscurePin);
+                  },
+                ),
+                border: const OutlineInputBorder(),
+              ),
+              validator: (value) {
+                final pin = value?.trim() ?? "";
+                if (pin.isEmpty) return "Enter transaction PIN";
+                if (!RegExp(r'^\d{4,6}$').hasMatch(pin)) {
+                  return "Transaction PIN must be 4 to 6 digits";
+                }
+                return null;
+              },
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text("Cancel"),
+        ),
+        TextButton(
+          onPressed: () {
+            if (_formKey.currentState!.validate()) {
+              Navigator.pop(context, _pinController.text.trim());
+            }
+          },
+          child: const Text("Continue"),
+        ),
+      ],
+    );
+  }
+}
+
 class TransactionPage extends StatefulWidget {
   final String qrData;
 
@@ -168,7 +255,14 @@ class _TransactionPageState extends State<TransactionPage> {
   @override
   void initState() {
     super.initState();
+    ScreenshotSecurityService.enable();
     _parseQRData();
+  }
+
+  @override
+  void dispose() {
+    ScreenshotSecurityService.disable();
+    super.dispose();
   }
 
   bool get _hasRequiredTransactionFields =>
@@ -274,76 +368,14 @@ class _TransactionPageState extends State<TransactionPage> {
   }
 
   Future<String?> _promptForTransactionPin(double amount) async {
-    final pinController = TextEditingController();
-    final formKey = GlobalKey<FormState>();
-    bool obscurePin = true;
-
-    try {
-      return showDialog<String>(
-        context: context,
-        barrierDismissible: false,
-        builder: (dialogContext) => StatefulBuilder(
-          builder: (context, setDialogState) => AlertDialog(
-            title: const Text("Transaction PIN Required"),
-            content: Form(
-              key: formKey,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    "This transaction is ${transaction["currency"] ?? ""} ${amount.toStringAsFixed(2)}.",
-                  ),
-                  const SizedBox(height: 16),
-                  TextFormField(
-                    controller: pinController,
-                    autofocus: true,
-                    obscureText: obscurePin,
-                    keyboardType: TextInputType.number,
-                    decoration: InputDecoration(
-                      labelText: "Transaction PIN",
-                      prefixIcon: const Icon(Icons.pin),
-                      suffixIcon: IconButton(
-                        icon: Icon(
-                          obscurePin ? Icons.visibility : Icons.visibility_off,
-                        ),
-                        onPressed: () {
-                          setDialogState(() => obscurePin = !obscurePin);
-                        },
-                      ),
-                      border: const OutlineInputBorder(),
-                    ),
-                    validator: (value) {
-                      final pin = value?.trim() ?? "";
-                      if (pin.isEmpty) return "Enter transaction PIN";
-                      if (!RegExp(r'^\d{4,6}$').hasMatch(pin)) {
-                        return "Transaction PIN must be 4 to 6 digits";
-                      }
-                      return null;
-                    },
-                  ),
-                ],
-              ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(dialogContext),
-                child: const Text("Cancel"),
-              ),
-              TextButton(
-                onPressed: () {
-                  if (formKey.currentState!.validate()) {
-                    Navigator.pop(dialogContext, pinController.text.trim());
-                  }
-                },
-                child: const Text("Continue"),
-              ),
-            ],
-          ),
-        ),
-      );
-    } finally {
-      pinController.dispose();
-    }
+    return showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => _TransactionPinDialog(
+        amountText:
+            "This transaction is ${transaction["currency"] ?? ""} ${amount.toStringAsFixed(2)}.",
+      ),
+    );
   }
 
   /// Parse QR code: tries encrypted JSON first, plain JSON second, else key/value pairs.
