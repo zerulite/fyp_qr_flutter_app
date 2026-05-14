@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:local_auth/local_auth.dart';
+import '../security/crypto_service.dart';
 
 class AccountPage extends StatefulWidget {
   const AccountPage({super.key});
@@ -22,7 +23,8 @@ class _AccountPageState extends State<AccountPage> {
   final PageController _pageController = PageController(viewportFraction: 0.85);
   final LocalAuthentication auth = LocalAuthentication();
 
-  Set<int> revealedCards = {};
+  Set<String> revealedCards = {};
+  Map<String, String> revealedCvvs = {};
   bool isAuthenticating = false;
 
   @override
@@ -112,20 +114,76 @@ class _AccountPageState extends State<AccountPage> {
     }
   }
 
-  Future<void> _handleReveal(int cardId) async {
-    if (revealedCards.contains(cardId)) {
-      setState(() => revealedCards.remove(cardId));
+  String _cardRevealKey(Map<String, dynamic> card) {
+    return (card['card_token'] ?? card['id'] ?? card['card_last4']).toString();
+  }
+
+  Future<String> _decryptCardCvv(Map<String, dynamic> card) async {
+    final encryptedCvv = card['cvv_encrypted']?.toString();
+    if (encryptedCvv == null || encryptedCvv.isEmpty) {
+      throw Exception("Encrypted CVV is unavailable");
+    }
+
+    final secureStorage = const FlutterSecureStorage();
+    final accountId = await secureStorage.read(key: 'lastUser');
+    if (accountId == null || accountId.isEmpty) {
+      throw Exception("No logged in user");
+    }
+
+    final privateKey = await CryptoService.getPrivateKey(accountId: accountId);
+    if (privateKey == null) {
+      throw Exception("Private key not found on this device");
+    }
+
+    final encryptedBytes = base64Decode(encryptedCvv);
+    final cvv = CryptoService.decryptStringWithRSAOAEP(
+      privateKey,
+      encryptedBytes,
+    );
+
+    if (!RegExp(r'^\d{3}$').hasMatch(cvv)) {
+      throw Exception("Invalid decrypted CVV");
+    }
+
+    return cvv;
+  }
+
+  Future<void> _handleReveal(Map<String, dynamic> card) async {
+    final cardKey = _cardRevealKey(card);
+
+    if (revealedCards.contains(cardKey)) {
+      setState(() {
+        revealedCards.remove(cardKey);
+        revealedCvvs.remove(cardKey);
+      });
       return;
     }
 
     final success = await _authenticate();
     if (!success) return;
 
-    setState(() => revealedCards.add(cardId));
+    try {
+      final cvv = await _decryptCardCvv(card);
+      if (!mounted) return;
+
+      setState(() {
+        revealedCvvs[cardKey] = cvv;
+        revealedCards.add(cardKey);
+      });
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text("Unable to reveal CVV: $e")));
+      return;
+    }
 
     Future.delayed(const Duration(seconds: 10), () {
       if (mounted) {
-        setState(() => revealedCards.remove(cardId));
+        setState(() {
+          revealedCards.remove(cardKey);
+          revealedCvvs.remove(cardKey);
+        });
       }
     });
   }
@@ -232,7 +290,8 @@ class _AccountPageState extends State<AccountPage> {
   }
 
   Widget _cardWidget(Map<String, dynamic> card) {
-    final isRevealed = revealedCards.contains(card['id']);
+    final cardKey = _cardRevealKey(card);
+    final isRevealed = revealedCards.contains(cardKey);
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -266,7 +325,7 @@ class _AccountPageState extends State<AccountPage> {
           if (isRevealed) ...[
             const SizedBox(height: 8),
             Text(
-              "CVV: ${card['cvv']}",
+              "CVV: ${revealedCvvs[cardKey] ?? '---'}",
               style: const TextStyle(color: Colors.white),
             ),
           ],
@@ -298,7 +357,7 @@ class _AccountPageState extends State<AccountPage> {
             child: TextButton(
               onPressed: isAuthenticating
                   ? null
-                  : () => _handleReveal(card['id']),
+                  : () => _handleReveal(Map<String, dynamic>.from(card)),
               child: Text(
                 isRevealed ? "Hide" : "Reveal",
                 style: const TextStyle(color: Colors.white),

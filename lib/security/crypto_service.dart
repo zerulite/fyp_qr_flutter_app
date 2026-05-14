@@ -178,6 +178,16 @@ class CryptoService {
     return aesKey;
   }
 
+  static String decryptStringWithRSAOAEP(
+    RSAPrivateKey privateKey,
+    Uint8List encryptedValue,
+  ) {
+    final engine = OAEPEncoding.withSHA256(RSAEngine())
+      ..init(false, PrivateKeyParameter<RSAPrivateKey>(privateKey));
+    final decrypted = engine.process(encryptedValue);
+    return utf8.decode(decrypted);
+  }
+
   static bool _isValidAESKeyLength(Uint8List key) =>
       key.length == 16 || key.length == 24 || key.length == 32;
 
