@@ -132,7 +132,7 @@ class _MainPageState extends State<MainPage> {
 
               const SizedBox(height: 15),
 
-              // Account Info (placeholder)
+              // Account Info
               _buildMenuCard(
                 context,
                 title: "Account Information",
