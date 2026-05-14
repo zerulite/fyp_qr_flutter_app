@@ -57,90 +57,97 @@ class _MainPageState extends State<MainPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text("Secure Pay Dashboard"),
-        centerTitle: true,
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.logout),
-            tooltip: "Logout",
-            onPressed: _confirmLogout,
-          ),
-        ],
-      ),
-      body: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            const SizedBox(height: 20),
-
-            const Text(
-              "Welcome Back",
-              style: TextStyle(fontSize: 26, fontWeight: FontWeight.bold),
-            ),
-
-            const SizedBox(height: 5),
-
-            Text(
-              "What would you like to do today?",
-              style: TextStyle(fontSize: 14, color: Colors.grey[600]),
-            ),
-
-            const SizedBox(height: 30),
-
-            // QR Scanner
-            _buildMenuCard(
-              context,
-              title: "Scan QR Payment",
-              subtitle: "Make or approve a payment",
-              icon: Icons.qr_code_scanner,
-              color: Colors.blue,
-              onTap: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => const QRScannerPage()),
-                );
-              },
-            ),
-
-            const SizedBox(height: 15),
-
-            // Transaction History
-            _buildMenuCard(
-              context,
-              title: "Transaction History",
-              subtitle: "View all your past payments",
-              icon: Icons.receipt_long,
-              color: Colors.green,
-              onTap: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => const TransactionHistoryPage(),
-                  ),
-                );
-              },
-            ),
-
-            const SizedBox(height: 15),
-
-            // Account Info (placeholder)
-            _buildMenuCard(
-              context,
-              title: "Account Information",
-              subtitle: "View your profile and balance",
-              icon: Icons.person,
-              color: Colors.orange,
-              onTap: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => const AccountPage()),
-                );
-              },
+    return PopScope(
+      canPop: false, // disable default back action
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop) return;
+        _confirmLogout();
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text("Secure Pay Dashboard"),
+          centerTitle: true,
+          actions: [
+            IconButton(
+              icon: const Icon(Icons.logout),
+              tooltip: "Logout",
+              onPressed: _confirmLogout,
             ),
           ],
+        ),
+        body: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const SizedBox(height: 20),
+
+              const Text(
+                "Welcome Back",
+                style: TextStyle(fontSize: 26, fontWeight: FontWeight.bold),
+              ),
+
+              const SizedBox(height: 5),
+
+              Text(
+                "What would you like to do today?",
+                style: TextStyle(fontSize: 14, color: Colors.grey[600]),
+              ),
+
+              const SizedBox(height: 30),
+
+              // QR Scanner
+              _buildMenuCard(
+                context,
+                title: "Scan QR Payment",
+                subtitle: "Make or approve a payment",
+                icon: Icons.qr_code_scanner,
+                color: Colors.blue,
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const QRScannerPage()),
+                  );
+                },
+              ),
+
+              const SizedBox(height: 15),
+
+              // Transaction History
+              _buildMenuCard(
+                context,
+                title: "Transaction History",
+                subtitle: "View all your past payments",
+                icon: Icons.receipt_long,
+                color: Colors.green,
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => const TransactionHistoryPage(),
+                    ),
+                  );
+                },
+              ),
+
+              const SizedBox(height: 15),
+
+              // Account Info (placeholder)
+              _buildMenuCard(
+                context,
+                title: "Account Information",
+                subtitle: "View your profile and balance",
+                icon: Icons.person,
+                color: Colors.orange,
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const AccountPage()),
+                  );
+                },
+              ),
+            ],
+          ),
         ),
       ),
     );
