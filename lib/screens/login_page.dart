@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 import 'package:local_auth/local_auth.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'register_page.dart';
+import '../security/crypto_service.dart';
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -78,6 +79,15 @@ class _LoginPageState extends State<LoginPage> {
         await secureStorage.write(key: 'lastUser', value: email);
 
         await secureStorage.write(key: 'password', value: password);
+
+        final keyReady = await _ensurePrivateKeyAfterLogin(
+          email: email,
+          token: token,
+        );
+        if (!keyReady) {
+          await _clearIncompleteLogin();
+          return;
+        }
 
         await _askEnableBiometric();
 
@@ -194,6 +204,15 @@ class _LoginPageState extends State<LoginPage> {
 
         await secureStorage.write(key: 'loggedIn', value: 'true');
 
+        final keyReady = await _ensurePrivateKeyAfterLogin(
+          email: email,
+          token: token,
+        );
+        if (!keyReady) {
+          await _clearIncompleteLogin();
+          return;
+        }
+
         if (!mounted) return;
 
         Navigator.pushReplacement(
@@ -234,6 +253,139 @@ class _LoginPageState extends State<LoginPage> {
     }
 
     await _biometricLogin();
+  }
+
+  Future<String?> _promptForTransactionPinForRebind() async {
+    final formKey = GlobalKey<FormState>();
+    var transactionPin = "";
+    var obscurePin = true;
+
+    return showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text("Device Rebind Required"),
+          content: Form(
+            key: formKey,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text(
+                  "This device is missing its private key. Enter your transaction PIN to rebind this device.",
+                ),
+                const SizedBox(height: 16),
+                TextFormField(
+                  autofocus: true,
+                  obscureText: obscurePin,
+                  keyboardType: TextInputType.number,
+                  onChanged: (value) => transactionPin = value.trim(),
+                  decoration: InputDecoration(
+                    labelText: "Transaction PIN",
+                    prefixIcon: const Icon(Icons.pin),
+                    suffixIcon: IconButton(
+                      icon: Icon(
+                        obscurePin ? Icons.visibility : Icons.visibility_off,
+                      ),
+                      onPressed: () {
+                        setDialogState(() => obscurePin = !obscurePin);
+                      },
+                    ),
+                    border: const OutlineInputBorder(),
+                  ),
+                  validator: (value) {
+                    final pin = value?.trim() ?? "";
+                    if (pin.isEmpty) return "Enter transaction PIN";
+                    if (!RegExp(r'^\d{4,6}$').hasMatch(pin)) {
+                      return "Transaction PIN must be 4 to 6 digits";
+                    }
+                    return null;
+                  },
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text("Cancel"),
+            ),
+            TextButton(
+              onPressed: () {
+                if (formKey.currentState!.validate()) {
+                  Navigator.pop(dialogContext, transactionPin);
+                }
+              },
+              child: const Text("Rebind"),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<bool> _ensurePrivateKeyAfterLogin({
+    required String email,
+    required String token,
+  }) async {
+    final existingPrivateKey = await CryptoService.getPrivateKey(
+      accountId: email,
+    );
+    if (existingPrivateKey != null) return true;
+
+    if (!mounted) return false;
+
+    final transactionPin = await _promptForTransactionPinForRebind();
+    if (transactionPin == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Device rebind is required to login.")),
+        );
+      }
+      return false;
+    }
+
+    final keyPair = CryptoService.generateRSAKeyPair();
+    final publicKeyPem = CryptoService.formatPublicKey(keyPair.publicKey);
+
+    final response = await http.post(
+      Uri.parse('https://fyp-bank-backend.onrender.com/api/account/public-key'),
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer $token',
+      },
+      body: jsonEncode({
+        'public_key': publicKeyPem,
+        'transaction_pin': transactionPin,
+      }),
+    );
+
+    if (response.statusCode == 200 || response.statusCode == 201) {
+      await CryptoService.savePrivateKey(keyPair.privateKey, accountId: email);
+      if (mounted) {
+        final data = response.body.isNotEmpty ? jsonDecode(response.body) : {};
+        final message = data['message'] ?? "Device rebound successfully.";
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(message)));
+      }
+      return true;
+    }
+
+    if (mounted) {
+      final data = response.body.isNotEmpty ? jsonDecode(response.body) : {};
+      final message =
+          data['message'] ?? data['error'] ?? "Device rebind failed.";
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(message)));
+    }
+    return false;
+  }
+
+  Future<void> _clearIncompleteLogin() async {
+    await secureStorage.write(key: 'loggedIn', value: 'false');
+    await secureStorage.delete(key: 'token');
   }
 
   @override

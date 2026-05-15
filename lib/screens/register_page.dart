@@ -40,10 +40,6 @@ class _RegisterPageState extends State<RegisterPage> {
 
       // ---------- crypto start ----------
       final keyPair = CryptoService.generateRSAKeyPair();
-      await CryptoService.savePrivateKey(
-        keyPair.privateKey,
-        accountId: accountId,
-      );
       final pubKeyStr = CryptoService.formatPublicKey(keyPair.publicKey);
       // ----------- crypto end -----------
 
@@ -62,6 +58,11 @@ class _RegisterPageState extends State<RegisterPage> {
       setState(() => loading = false);
 
       if (response.statusCode == 200 || response.statusCode == 201) {
+        await CryptoService.savePrivateKey(
+          keyPair.privateKey,
+          accountId: accountId,
+        );
+
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text("Registration successful! Please login."),
