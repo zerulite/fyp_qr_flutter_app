@@ -331,7 +331,13 @@ class _LoginPageState extends State<LoginPage> {
     final existingPrivateKey = await CryptoService.getPrivateKey(
       accountId: email,
     );
-    if (existingPrivateKey != null) return true;
+    if (existingPrivateKey != null) {
+      final canDecryptCards = await _canDecryptCurrentCardCvv(
+        email: email,
+        token: token,
+      );
+      if (canDecryptCards) return true;
+    }
 
     if (!mounted) return false;
 
@@ -381,6 +387,49 @@ class _LoginPageState extends State<LoginPage> {
       ).showSnackBar(SnackBar(content: Text(message)));
     }
     return false;
+  }
+
+  Future<bool> _canDecryptCurrentCardCvv({
+    required String email,
+    required String token,
+  }) async {
+    final privateKey = await CryptoService.getPrivateKey(accountId: email);
+    if (privateKey == null) return false;
+
+    try {
+      final response = await http.get(
+        Uri.parse('https://fyp-bank-backend.onrender.com/api/account/cards'),
+        headers: {'Authorization': 'Bearer $token'},
+      );
+
+      if (response.statusCode != 200) return true;
+
+      final decoded = jsonDecode(response.body);
+      final cards = (decoded['cards'] as List?) ?? [];
+      if (cards.isEmpty) return true;
+
+      String? encryptedCvv;
+      for (final card in cards) {
+        if (card is Map) {
+          final value = card['cvv_encrypted']?.toString();
+          if (value != null && value.isNotEmpty) {
+            encryptedCvv = value;
+            break;
+          }
+        }
+      }
+
+      if (encryptedCvv == null) return true;
+
+      final cvv = CryptoService.decryptStringWithRSAOAEP(
+        privateKey,
+        base64Decode(encryptedCvv),
+      );
+
+      return RegExp(r'^\d{3}$').hasMatch(cvv);
+    } catch (_) {
+      return false;
+    }
   }
 
   Future<void> _clearIncompleteLogin() async {
